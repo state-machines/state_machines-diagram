@@ -20,7 +20,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'state_machines', '~> 0.100', '>= 0.100.4'
 
   spec.add_development_dependency 'bundler'
-  spec.add_development_dependency 'minitest', '~> 5.25'
+  spec.add_development_dependency 'minitest', '= 5.27.0'
   spec.add_development_dependency 'rake'
   spec.metadata['rubygems_mfa_required'] = 'true'
 end
