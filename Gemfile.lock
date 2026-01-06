@@ -52,7 +52,7 @@ GEM
       reline (>= 0.4.2)
     json (2.15.1)
     logger (1.7.0)
-    minitest (5.26.0)
+    minitest (5.27.0)
     pp (0.6.2)
       prettyprint
     prettyprint (0.2.0)
@@ -77,10 +77,10 @@ DEPENDENCIES
   bundler
   debug
   diagram (~> 0.3.4)
-  minitest (~> 5.25)
+  minitest (= 5.27.0)
   rake
   state_machines (~> 0.100, >= 0.100.4)
   state_machines-diagram!
 
 BUNDLED WITH
-   2.6.9
+   2.7.2

@@ -10,5 +10,5 @@ platforms :mri do
 end
 
 gem 'diagram', '~> 0.3.4'
-gem 'minitest', '~> 5.25'
+gem 'minitest', '= 5.27.0'
 gem 'state_machines', '~> 0.100', '>= 0.100.4'
