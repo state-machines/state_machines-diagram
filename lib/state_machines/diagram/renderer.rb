@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'builder'
+require_relative 'schema_builder'
 require 'set'
 
 module StateMachines
@@ -20,6 +21,10 @@ module StateMachines
         [diagram, builder]
       end
 
+      def machine_schema(machine, options = {})
+        SchemaBuilder.new(machine, options).build
+      end
+
       def output_diagram(diagram, io, options, builder = nil)
         case options[:format]
         when :json
@@ -27,6 +32,10 @@ module StateMachines
         when :yaml
           require 'yaml'
           io.puts diagram_hash_with_metadata(diagram, builder).to_yaml
+        when :machine_schema
+          # Output MachineSchema format compatible with state-machines-rs CLI
+          schema = SchemaBuilder.new(builder.machine, options)
+          io.puts schema.to_json
         else
           # Default text representation
           io.puts diagram_to_text(diagram, options, builder)
