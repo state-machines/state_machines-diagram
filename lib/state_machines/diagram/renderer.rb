@@ -66,13 +66,7 @@ module StateMachines
         end
 
         # Build diagram with all involved states
-        builder = Builder.new(machine, options)
-        builder.instance_variable_set(:@diagram, builder.send(:create_diagram))
-
-        # Add all involved states first
-        machine.states.select { |s| states_involved.include?(s.name) }.each do |s|
-          builder.send(:add_state_node, s)
-        end
+        builder = build_filtered_builder(machine, states_involved, options)
 
         # Then add transitions
         machine.events.each do |event|
@@ -147,13 +141,7 @@ module StateMachines
         end
 
         # Build a fresh diagram for this event
-        builder = Builder.new(machine, options)
-        builder.instance_variable_set(:@diagram, builder.send(:create_diagram))
-
-        # Add states to diagram first
-        machine.states.select { |s| states_involved.include?(s.name) }.each do |state|
-          builder.send(:add_state_node, state)
-        end
+        builder = build_filtered_builder(machine, states_involved, options)
 
         # Add transitions for this event
         builder.send(:add_event_transitions, event)
@@ -175,18 +163,24 @@ module StateMachines
         end
 
         # Build fresh diagram
-        builder = Builder.new(machine, {})
-        builder.instance_variable_set(:@diagram, builder.send(:create_diagram))
-
-        # Add states first
-        machine.states.select { |s| states_involved.include?(s.name) }.each do |state|
-          builder.send(:add_state_node, state)
-        end
+        builder = build_filtered_builder(machine, states_involved)
 
         # Add transitions
         builder.send(:add_branch_transitions, branch, event)
 
         output_diagram(builder.diagram, io, {}, builder)
+      end
+
+      # Creates a fresh builder whose diagram only contains the given states
+      def build_filtered_builder(machine, states_involved, options = {})
+        builder = Builder.new(machine, options)
+        builder.instance_variable_set(:@diagram, builder.send(:create_diagram))
+
+        machine.states.select { |s| states_involved.include?(s.name) }.each do |state|
+          builder.send(:add_state_node, state)
+        end
+
+        builder
       end
 
       def diagram_to_text(diagram, options = {}, builder = nil)
@@ -293,11 +287,10 @@ module StateMachines
         end
 
         conditions = metadata.fetch(:conditions, {})
-        Array(conditions[:if]).compact.each do |condition|
-          Array(condition).each { |item| guard_terms[:if] << normalize_condition_name(item) }
-        end
-        Array(conditions[:unless]).compact.each do |condition|
-          Array(condition).each { |item| guard_terms[:unless] << normalize_condition_name(item) }
+        %i[if unless].each do |kind|
+          Array(conditions[kind]).compact.each do |condition|
+            Array(condition).each { |item| guard_terms[kind] << normalize_condition_name(item) }
+          end
         end
 
         guard_terms[:if].uniq!

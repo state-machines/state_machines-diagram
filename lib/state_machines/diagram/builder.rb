@@ -7,6 +7,17 @@ module StateMachines
     class Builder
       attr_reader :machine, :options, :diagram, :state_metadata, :transition_metadata
 
+      # Human-readable label for a Proc/Method, pointing at its source location
+      def self.callable_label(callable)
+        if callable.respond_to?(:source_location) && callable.source_location
+          file, line = callable.source_location
+          filename = File.basename(file) if file
+          "lambda@#{filename}:#{line}"
+        else
+          'lambda'
+        end
+      end
+
       def initialize(machine, options = {})
         @machine = machine
         @options = options
@@ -231,13 +242,7 @@ module StateMachines
           method_name += '?' unless method_name.end_with?('?')
           method_name
         when Proc, Method
-          if condition.respond_to?(:source_location) && condition.source_location
-            file, line = condition.source_location
-            filename = File.basename(file) if file
-            "lambda@#{filename}:#{line}"
-          else
-            'lambda'
-          end
+          self.class.callable_label(condition)
         else
           condition.to_s
         end
@@ -266,16 +271,7 @@ module StateMachines
       def format_action(action)
         case action
         when Proc, Method
-          # Try to extract source location for better readability
-          if action.respond_to?(:source_location) && action.source_location
-            file, line = action.source_location
-            filename = File.basename(file) if file
-            "lambda@#{filename}:#{line}"
-          else
-            'lambda'
-          end
-        when Symbol
-          action.to_s
+          self.class.callable_label(action)
         else
           action.to_s
         end

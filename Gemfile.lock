@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    state_machines-diagram (0.1.0)
+    state_machines-diagram (0.2.0)
       diagram (~> 0.3.4)
       state_machines (~> 0.100, >= 0.100.4)
 
