@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
   spec.description   = 'Diagram module for state machines. Builds diagram representations of state machines that can be rendered in various formats'
   spec.homepage      = 'https://github.com/state-machines/state_machines-diagram'
   spec.license       = 'MIT'
-  spec.required_ruby_version = '>= 3.3.0'
+  spec.required_ruby_version = '>= 4.0'
 
   spec.files         = Dir['{lib}/**/*', 'LICENSE.txt', 'README.md']
   spec.require_paths = ['lib']
