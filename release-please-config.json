@@ -1,0 +1,11 @@
+{
+  "bootstrap-sha": "b3a8c8bddacd94a4d0f8aa9fa2396480393bb8af",
+  "packages": {
+    ".": {
+      "release-type": "ruby",
+      "package-name": "state_machines-diagram",
+      "version-file": "lib/state_machines/diagram/version.rb",
+      "bump-minor-pre-major": true
+    }
+  }
+}
