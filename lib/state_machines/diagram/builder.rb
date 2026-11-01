@@ -121,20 +121,15 @@ module StateMachines
         valid_states = machine.states.by_priority.map(&:name)
 
         branch.state_requirements.each do |requirement|
-          from_states = requirement[:from].filter(valid_states)
-          to_states = determine_to_states(requirement, from_states)
-
-          create_transitions(from_states, to_states, event, branch)
+          requirement[:from].filter(valid_states).each do |from|
+            add_transition(from, to_state_for(requirement, from), event, branch)
+          end
         end
       end
 
-      def determine_to_states(requirement, from_states)
-        if requirement[:to].values.empty?
-          # Loopback transitions
-          from_states
-        else
-          [requirement[:to].values.first]
-        end
+      def to_state_for(requirement, from)
+        targets = requirement[:to].values
+        targets.empty? ? from : targets.first
       end
 
       def create_transitions(from_states, to_states, event, branch)
