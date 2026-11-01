@@ -128,8 +128,9 @@ module StateMachines
       end
 
       def to_state_for(requirement, from)
-        targets = requirement[:to].values
-        targets.empty? ? from : targets.first
+        return from if requirement[:to].is_a?(LoopbackMatcher)
+
+        requirement[:to].filter([from] | machine.states.map(&:name)).first
       end
 
       def create_transitions(from_states, to_states, event, branch)
