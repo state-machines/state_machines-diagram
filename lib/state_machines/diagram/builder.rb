@@ -7,6 +7,24 @@ module StateMachines
     class Builder
       attr_reader :machine, :options, :diagram, :state_metadata, :transition_metadata
 
+      # The (source, target) pairs a branch draws, resolved as the core resolves them
+      def self.transition_pairs(machine, branch)
+        state_names = machine.states.map(&:name)
+        source_names = machine.states.by_priority.map(&:name)
+
+        branch.state_requirements.flat_map do |requirement|
+          requirement[:from].filter(source_names).map do |from|
+            [from, to_state_for(requirement, from, state_names)]
+          end
+        end
+      end
+
+      def self.to_state_for(requirement, from, state_names)
+        return from if requirement[:to].is_a?(LoopbackMatcher)
+
+        requirement[:to].filter([from] | state_names).first
+      end
+
       # Human-readable label for a Proc/Method, pointing at its source location
       def self.callable_label(callable)
         if callable.respond_to?(:source_location) && callable.source_location
@@ -118,26 +136,8 @@ module StateMachines
       end
 
       def add_branch_transitions(branch, event)
-        valid_states = machine.states.by_priority.map(&:name)
-
-        branch.state_requirements.each do |requirement|
-          requirement[:from].filter(valid_states).each do |from|
-            add_transition(from, to_state_for(requirement, from), event, branch)
-          end
-        end
-      end
-
-      def to_state_for(requirement, from)
-        return from if requirement[:to].is_a?(LoopbackMatcher)
-
-        requirement[:to].filter([from] | machine.states.map(&:name)).first
-      end
-
-      def create_transitions(from_states, to_states, event, branch)
-        from_states.each do |from|
-          to_states.each do |to|
-            add_transition(from, to, event, branch)
-          end
+        self.class.transition_pairs(machine, branch).each do |from, to|
+          add_transition(from, to, event, branch)
         end
       end
 

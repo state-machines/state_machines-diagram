@@ -43,49 +43,24 @@ module StateMachines
       end
 
       def draw_state(state, _graph, options = {}, io = $stdout)
-        # Build a diagram containing just this state and its transitions
         machine = state.machine
 
-        # Find all states involved with this state
-        states_involved = Set.new([state.name])
+        touching = each_transition_pair(machine).select { |from, to, _event, _branch| [from, to].include?(state.name) }
+        states_involved = Set.new([state.name]).merge(touching.flat_map { |from, to, _event, _branch| [from, to] })
 
-        machine.events.each do |event|
-          event.branches.each do |branch|
-            branch.state_requirements.each do |requirement|
-              valid_states = machine.states.by_priority.map(&:name)
-              from_states = requirement[:from].filter(valid_states)
-              to_states = requirement[:to].values
-
-              if from_states.include?(state.name)
-                states_involved.merge(to_states)
-              elsif to_states.include?(state.name)
-                states_involved.merge(from_states)
-              end
-            end
-          end
-        end
-
-        # Build diagram with all involved states
         builder = build_filtered_builder(machine, states_involved, options)
-
-        # Then add transitions
-        machine.events.each do |event|
-          event.branches.each do |branch|
-            branch.state_requirements.each do |requirement|
-              valid_states = machine.states.by_priority.map(&:name)
-              from_states = requirement[:from].filter(valid_states)
-              to_states = requirement[:to].values
-
-              # Only add if involves our state
-              if (from_states & states_involved.to_a).any? && (to_states & states_involved.to_a).any?
-                builder.send(:create_transitions, from_states & states_involved.to_a, to_states & states_involved.to_a,
-                             event, branch)
-              end
-            end
-          end
-        end
+        touching.each { |from, to, event, branch| builder.send(:add_transition, from, to, event, branch) }
 
         output_diagram(builder.diagram, io, options.merge(state_filter: state.name.to_s), builder)
+      end
+
+      # Every (source, target, event, branch) the machine draws
+      def each_transition_pair(machine)
+        machine.events.flat_map do |event|
+          event.branches.flat_map do |branch|
+            Builder.transition_pairs(machine, branch).map { |from, to| [from, to, event, branch] }
+          end
+        end
       end
 
       def diagram_hash_with_metadata(diagram, builder)
@@ -127,20 +102,10 @@ module StateMachines
       def draw_event(event, _graph, options = {}, io = $stdout)
         machine = event.machine
 
-        # Add all states involved in this event
-        states_involved = Set.new
-        event.branches.each do |branch|
-          branch.state_requirements.each do |requirement|
-            valid_states = machine.states.by_priority.map(&:name)
-            from_states = requirement[:from].filter(valid_states)
-            to_states = requirement[:to].values
+        states_involved = Set.new(event.branches.flat_map do |branch|
+          Builder.transition_pairs(machine, branch).flatten
+        end)
 
-            states_involved.merge(from_states)
-            states_involved.merge(to_states)
-          end
-        end
-
-        # Build a fresh diagram for this event
         builder = build_filtered_builder(machine, states_involved, options)
 
         # Add transitions for this event
@@ -149,20 +114,11 @@ module StateMachines
         output_diagram(builder.diagram, io, options.merge(event_filter: event.name.to_s), builder)
       end
 
-      def draw_branch(branch, _graph, event, valid_states, io = $stdout)
+      def draw_branch(branch, _graph, event, _valid_states, io = $stdout)
         machine = event.machine
 
-        # Add states involved in this branch
-        states_involved = Set.new
-        branch.state_requirements.each do |requirement|
-          from_states = requirement[:from].filter(valid_states)
-          to_states = requirement[:to].values
+        states_involved = Set.new(Builder.transition_pairs(machine, branch).flatten)
 
-          states_involved.merge(from_states)
-          states_involved.merge(to_states)
-        end
-
-        # Build fresh diagram
         builder = build_filtered_builder(machine, states_involved)
 
         # Add transitions

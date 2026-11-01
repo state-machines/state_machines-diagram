@@ -4,6 +4,33 @@ require 'test_helper'
 require 'stringio'
 
 class DiagramRendererTest < StateMachines::TestCase
+  class Sentinel
+    state_machine initial: :watching do
+      state :dozing
+
+      event :hold do
+        transition %i[watching dozing] => same
+      end
+
+      event :rouse do
+        transition dozing: :watching
+      end
+    end
+  end
+
+  def test_per_state_diagram_draws_every_transition_touching_that_state
+    machine = Sentinel.state_machines[:state]
+    performed = performed_pairs(Sentinel)
+
+    machine.states.map(&:name).each do |state|
+      io = StringIO.new
+      StateMachines::Diagram::Renderer.draw_state(machine.states[state], nil, {}, io)
+      drawn = io.string.lines.grep(/->/).map { |line| line[/(\S+) -> (\S+)/, 0].split(' -> ') }.uniq.sort
+
+      assert_equal performed.select { |pair| pair.include?(state.to_s) }, drawn, "draw_state(#{state})"
+    end
+  end
+
   def setup
     @dragon = Dragon.new
     @mage = Mage.new
