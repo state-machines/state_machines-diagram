@@ -227,10 +227,22 @@ module StateMachines
           condition_tokens << "!#{token}" if token
         end
 
+        state_guards_of(branch).each do |kind, requirements|
+          tokens = requirements.map { |machine, state| "#{machine}=#{state}" }
+          guard_conditions[kind] = tokens
+          condition_tokens.concat(tokens.map { |token| "#{kind} #{token}" })
+        end
+
         {
           display: condition_tokens.empty? ? nil : condition_tokens.join(' && '),
           conditions: guard_conditions
         }
+      end
+
+      # State-based guards reached the core after the version this gem still
+      # supports, so a diagram drawn against an older one simply has none.
+      def state_guards_of(branch)
+        branch.respond_to?(:state_guards) ? branch.state_guards : {}
       end
 
       def guard_condition_token(condition)
