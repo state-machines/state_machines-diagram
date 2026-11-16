@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/state-machines/state_machines-diagram/actions/workflows/ruby.yml/badge.svg?branch=master)](https://github.com/state-machines/state_machines-diagram/actions/workflows/ruby.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
-[![Ruby](https://img.shields.io/badge/ruby-3.3%2B-red.svg)](state_machines-diagram.gemspec)
+[![Ruby](https://img.shields.io/badge/ruby-4.0%2B-red.svg)](state_machines-diagram.gemspec)
 
 An extensible diagram building foundation for the state_machines ecosystem. This gem provides a structured intermediate representation (IR) and adapter framework that enables consistent visualization across multiple output formats.
 
@@ -76,32 +76,26 @@ StateMachine → Builder → Diagrams::StateDiagram → Renderer → Output
 
 #### 1. Intermediate Representation (IR)
 
-The `Diagrams::StateDiagram` IR uses immutable `Dry::Struct` objects to represent state machine structure:
+The IR is a `Diagrams::StateDiagram` from the [diagram](https://github.com/seuros/diagram-ruby) gem
+(0.4+). Its elements are immutable `Data` values, compared by value, and its
+collections are frozen arrays. The builder fills it through the diagram's own
+keyword methods, which refuse unknown states and wrongly typed values:
 
 ```ruby
-# State representation
-Diagrams::Elements::State = Dry::Struct do
-  attribute :id, Types::Strict::String
-  attribute :state_type, Types::StateType  # :initial, :final, :normal
-  attribute :name, Types::Strict::String.optional
-end
+diagram = Diagrams::StateDiagram.new(title: 'Order status State Machine')
+diagram.add_state(id: 'pending', label: 'pending')
+diagram.add_state(id: 'processing', label: 'processing')
+diagram.add_transition(source_state_id: 'pending', target_state_id: 'processing',
+                       label: 'process', guard: 'payment_cleared?')
 
-# Transition representation with semantic information
-Diagrams::Elements::Transition = Dry::Struct do
-  attribute :source_state_id, Types::Strict::String
-  attribute :target_state_id, Types::Strict::String
-  attribute :label, Types::Strict::String.optional
-  attribute :guard, Types::Strict::String.optional    # if: condition
-  attribute :action, Types::Strict::String.optional   # callback method
-end
-
-# Complete diagram structure
-Diagrams::StateDiagram = Dry::Struct do
-  attribute :states, Types::Array.of(Diagrams::Elements::State)
-  attribute :transitions, Types::Array.of(Diagrams::Elements::Transition)
-  attribute :title, Types::Strict::String.optional
-end
+diagram.transitions.first
+# => #<data Diagrams::Elements::Transition source_state_id="pending", target_state_id="processing",
+#      label="process", guard="payment_cleared?", action=nil>
 ```
+
+Whether a state is initial or final, the structured guards (including
+state-based guards such as `if_state`) and the callbacks are kept by the builder
+in `state_metadata` and `transition_metadata`, not in the diagram.
 
 #### 2. Builder Contract
 
@@ -299,12 +293,13 @@ This gem serves as the foundation for rendering-specific gems:
 
 ### Ruby Version Support
 
-- **Ruby 3.3+**: Required for pattern matching and modern syntax
+- **Ruby 4.0+**
+- **state_machines 0.300+**
 - **Rails 7.2+**: Optional, for ActiveRecord/ActiveModel integration
 
 ## Performance Considerations
 
-- **Immutable IR**: Uses `Dry::Struct` for thread-safe, immutable diagram objects
+- **Immutable IR**: Diagram elements are frozen `Data` values
 - **Lazy Evaluation**: Diagrams are built only when `draw` is called
 - **Memory Efficient**: No global state or caching by default
 - **Streaming Support**: Large diagrams can be rendered incrementally

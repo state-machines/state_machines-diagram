@@ -103,7 +103,8 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert schema.key?(:states)
     assert schema.key?(:events)
     assert schema.key?(:superstates)
-    assert schema.key?(:async_mode)
+    # MachineSchema's async_mode defaults to false; the core has no async mode
+    refute schema.key?(:async_mode)
 
     # States should be array of strings
     assert schema[:states].all? { |s| s.is_a?(String) }

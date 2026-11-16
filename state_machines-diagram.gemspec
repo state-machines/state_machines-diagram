@@ -16,8 +16,8 @@ Gem::Specification.new do |spec|
   spec.files         = Dir['{lib}/**/*', 'LICENSE.txt', 'README.md']
   spec.require_paths = ['lib']
 
-  spec.add_dependency 'diagram', '~> 0.3.4'
-  spec.add_dependency 'state_machines', '~> 0.100', '>= 0.100.4'
+  spec.add_dependency 'diagram', '>= 0.4'
+  spec.add_dependency 'state_machines', '>= 0.300'
 
   spec.add_development_dependency 'bundler'
   spec.add_development_dependency 'minitest', '~> 6.0'

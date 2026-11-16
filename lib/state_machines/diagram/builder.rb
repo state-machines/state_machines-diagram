@@ -77,15 +77,8 @@ module StateMachines
       end
 
       def add_state_node(state)
-        state_node = ::Diagrams::Elements::State.new(
-          id: state_id(state),
-          label: state_label(state)
-        )
+        diagram.add_state(id: state_id(state), label: state_label(state))
 
-        diagram.add_state(state_node)
-
-        # Store metadata separately for now
-        @state_metadata ||= {}
         @state_metadata[state_id(state)] = {
           type: state_type(state),
           metadata: build_state_metadata(state)
@@ -147,7 +140,7 @@ module StateMachines
 
         guard_info = extract_guard_conditions(branch)
 
-        transition = ::Diagrams::Elements::Transition.new(
+        transition = diagram.add_transition(
           source_state_id: from_id.empty? ? 'nil_state' : from_id,
           target_state_id: to_id.empty? ? 'nil_state' : to_id,
           label: transition_label(event),
@@ -155,10 +148,6 @@ module StateMachines
           action: extract_action_info(branch, event)
         )
 
-        diagram.add_transition(transition)
-
-        # Store additional metadata separately for advanced analysis
-        @transition_metadata ||= []
         transition_data = {
           transition: transition,
           from: from.to_s,
@@ -223,7 +212,7 @@ module StateMachines
           condition_tokens << "!#{token}" if token
         end
 
-        state_guards_of(branch).each do |kind, requirements|
+        branch.state_guards.each do |kind, requirements|
           tokens = requirements.map { |machine, state| "#{machine}=#{state}" }
           guard_conditions[kind] = tokens
           condition_tokens.concat(tokens.map { |token| "#{kind} #{token}" })
@@ -233,12 +222,6 @@ module StateMachines
           display: condition_tokens.empty? ? nil : condition_tokens.join(' && '),
           conditions: guard_conditions
         }
-      end
-
-      # State-based guards reached the core after the version this gem still
-      # supports, so a diagram drawn against an older one simply has none.
-      def state_guards_of(branch)
-        branch.respond_to?(:state_guards) ? branch.state_guards : {}
       end
 
       def guard_condition_token(condition)

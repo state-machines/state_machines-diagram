@@ -18,8 +18,7 @@ module StateMachines
           initial: initial_state,
           states: state_names,
           superstates: build_superstates,
-          events: build_events,
-          async_mode: false
+          events: build_events
         }.compact
       end
 
