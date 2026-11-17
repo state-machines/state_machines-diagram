@@ -67,14 +67,10 @@ module StateMachines
         base_hash = diagram.to_h
         return base_hash unless builder
 
-        transition_metadata_index = build_transition_metadata_index(builder)
         transition_hashes = extract_transition_hashes(base_hash)
         return base_hash unless transition_hashes
 
-        diagram.transitions.each_with_index do |transition, index|
-          metadata = transition_metadata_index[transition] ||
-                     find_fallback_transition_metadata(transition_metadata_index, transition) ||
-                     {}
+        transitions_with_metadata(diagram, builder).each_with_index do |(transition, metadata), index|
           transition_hash = transition_hashes[index]
           next unless transition_hash
 
@@ -156,72 +152,42 @@ module StateMachines
         output << "=== #{diagram.title} ==="
         output << ''
 
-        # Use provided builder to access metadata (with nil safety)
-        metadata_source = builder&.state_metadata || {}
+        # Names and labels come from the builder's metadata: the diagram
+        # holds escaped ids and no blank text
+        state_metadata = builder&.state_metadata || {}
+        state_name = ->(id) { state_metadata.dig(id, :name) || id }
 
         # List states
         output << 'States:'
         diagram.states.each do |state|
-          metadata = metadata_source[state.id] || {}
-          type_marker = case metadata[:type]
-                        when 'initial' then ' [*]'
-                        when 'final' then ' (O)'
-                        else ''
-                        end
-          label = state.label || state.id
-          output << "  - #{label}#{type_marker}"
+          metadata = state_metadata[state.id] || {}
+          markers = +''
+          markers << ' [*]' if metadata[:initial]
+          markers << ' (O)' if metadata[:final]
+          label = metadata.fetch(:label) { state.label || state.id }
+          output << "  - #{label}#{markers}"
         end
 
         output << ''
         output << 'Transitions:'
 
-        # List transitions with semantic information from the transition objects
-        transition_metadata_index = build_transition_metadata_index(builder)
-
-        diagram.transitions.each do |transition|
-          metadata = transition_metadata_index[transition] ||
-                     find_fallback_transition_metadata(transition_metadata_index, transition) ||
-                     {}
+        transitions_with_metadata(diagram, builder).each do |transition, metadata|
           condition_str = format_guard_condition(transition, metadata)
           action_str = format_action_callback(transition, metadata)
 
-          label = transition.label || ''
-          output << "  - #{transition.source_state_id} -> #{transition.target_state_id} [#{label}]#{condition_str}#{action_str}"
+          label = metadata.fetch(:label) { transition.label || '' }
+          output << "  - #{state_name[transition.source_state_id]} -> #{state_name[transition.target_state_id]} " \
+                    "[#{label}]#{condition_str}#{action_str}"
         end
 
         output.join("\n")
       end
 
-      def build_transition_metadata_index(builder)
-        return {} unless builder&.respond_to?(:transition_metadata)
-
-        Array(builder.transition_metadata).each_with_object({}) do |metadata, index|
-          transition = metadata[:transition]
-          if transition
-            index[transition] = metadata
-          end
-
-          key = [
-            metadata[:from].to_s,
-            metadata[:to].to_s,
-            metadata[:event].to_s
-          ]
-          (index[:by_key] ||= Hash.new { |h, k| h[k] = [] })[key] << metadata
-        end
-      end
-
-      def find_fallback_transition_metadata(index, transition)
-        by_key = index[:by_key]
-        return unless by_key
-
-        key = [
-          transition.source_state_id.to_s,
-          transition.target_state_id.to_s,
-          transition.label.to_s
-        ]
-
-        metadata_list = by_key[key]
-        metadata_list&.first
+      # Each transition with its builder metadata: the builder records one
+      # entry per transition it adds, in order
+      def transitions_with_metadata(diagram, builder)
+        metadata = builder ? builder.transition_metadata : []
+        diagram.transitions.each_with_index.map { |transition, index| [transition, metadata[index] || {}] }
       end
 
       def format_guard_condition(transition, metadata = {})

@@ -95,7 +95,10 @@ diagram.transitions.first
 
 Whether a state is initial or final, the structured guards (including
 state-based guards such as `if_state`) and the callbacks are kept by the builder
-in `state_metadata` and `transition_metadata`, not in the diagram.
+in `state_metadata` and `transition_metadata`, not in the diagram. So are
+names the diagram refuses: a state named `*` (its terminal pseudo-state) or a
+blank name gets an escaped id (`%2a`, `%20`), and a blank event name leaves
+the transition's label empty; the metadata keeps the name.
 
 #### 2. Builder Contract
 

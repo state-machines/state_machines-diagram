@@ -342,4 +342,41 @@ class DiagramRendererTest < StateMachines::TestCase
       assert line.include?(']'), "Transition line should contain closing bracket: #{line}"
     end
   end
+  def test_text_shows_the_names_a_diagram_cannot_hold
+    klass = Class.new do
+      attr_accessor :state
+
+      state_machine :state, initial: :idle do
+        event :go do
+          transition idle: :"*"
+        end
+
+        event :" " do
+          transition :"*" => :" "
+        end
+      end
+    end
+
+    io = StringIO.new
+    StateMachines::Diagram::Renderer.draw_machine(klass.state_machine(:state), io: io)
+
+    output = io.string
+    assert_includes output, "  - *\n"
+    assert_includes output, "  -   (O)\n"
+    assert_includes output, '  - idle -> * [go]'
+    assert_includes output, '  - * ->   [ ]'
+  end
+
+  def test_text_marks_a_state_both_initial_and_final
+    klass = Class.new do
+      attr_accessor :state
+
+      state_machine :state, initial: :alone
+    end
+
+    io = StringIO.new
+    StateMachines::Diagram::Renderer.draw_machine(klass.state_machine(:state), io: io)
+
+    assert_includes io.string, '  - alone [*] (O)'
+  end
 end

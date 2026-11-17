@@ -5,18 +5,52 @@ require 'diagram'
 module StateMachines
   module Diagram
     class Builder
+      # The diagram id of the nil state
+      NIL_STATE_ID = 'nil_state'
+      # The form of an escaped id: '%' and the name's bytes in hex
+      ESCAPED_ID = /\A%(?:\h\h)*\z/
+
       attr_reader :machine, :options, :diagram, :state_metadata, :transition_metadata
+
+      # The diagram id of the state named +name+. A diagram refuses blank ids
+      # and its terminal pseudo-state '*', which are legal state names, so
+      # those, 'nil_state' (the nil state's id) and names already of the
+      # escaped form are escaped: distinct names always get distinct ids. The
+      # name itself stays in the state's metadata.
+      def self.state_id(name)
+        return NIL_STATE_ID if name.nil?
+
+        value = name.to_s
+        return value unless value == ::Diagrams::StateDiagram::TERMINAL || value.strip.empty? ||
+                            value == NIL_STATE_ID || value.match?(ESCAPED_ID)
+
+        "%#{value.unpack1('H*')}"
+      end
+
+      # One state guard as text, its requirements kept together under the
+      # guard's own kind: "if_any_state (gate=open, alarm=on)"
+      def self.state_guard_token(kind, requirements)
+        pairs = requirements.map { |machine_name, state| "#{machine_name}=#{state}" }
+        pairs.one? ? "#{kind} #{pairs.first}" : "#{kind} (#{pairs.join(', ')})"
+      end
 
       # The (source, target) pairs a branch draws, resolved as the core resolves them
       def self.transition_pairs(machine, branch)
         state_names = machine.states.map(&:name)
-        source_names = machine.states.by_priority.map(&:name)
+        source_names = states_of(machine).map(&:name)
 
         branch.state_requirements.flat_map do |requirement|
           requirement[:from].filter(source_names).map do |from|
             [from, to_state_for(requirement, from, state_names)]
           end
         end
+      end
+
+      # The machine's states by priority, each once: the core looks names up
+      # by their String form, so nil and :"" find the same state and
+      # StateCollection#by_priority can list it twice
+      def self.states_of(machine)
+        machine.states.by_priority.uniq
       end
 
       def self.to_state_for(requirement, from, state_names)
@@ -71,39 +105,39 @@ module StateMachines
       end
 
       def add_states
-        machine.states.by_priority.each do |state|
+        self.class.states_of(machine).each do |state|
           add_state_node(state)
         end
       end
 
-      def add_state_node(state)
-        diagram.add_state(id: state_id(state), label: state_label(state))
+      # A diagram holds no blank text; the metadata keeps it as it is
+      def diagram_text(value)
+        value unless value.nil? || value.strip.empty?
+      end
 
-        @state_metadata[state_id(state)] = {
-          type: state_type(state),
+      def add_state_node(state)
+        id = self.class.state_id(state.name)
+        label = state_label(state)
+        diagram.add_state(id: id, label: diagram_text(label))
+
+        @state_metadata[id] = {
+          name: state_name(state),
+          label: label,
+          initial: state.initial?,
+          final: state.final?,
           metadata: build_state_metadata(state)
         }
       end
 
-      def state_id(state)
-        state.name ? state.name.to_s : 'nil_state'
+      def state_name(state)
+        state.name ? state.name.to_s : NIL_STATE_ID
       end
 
       def state_label(state)
         if options[:human_names]
           state.human_name(machine.owner_class)
         else
-          state_id(state)
-        end
-      end
-
-      def state_type(state)
-        if state.initial?
-          'initial'
-        elsif state.final?
-          'final'
-        else
-          'normal'
+          state_name(state)
         end
       end
 
@@ -111,8 +145,7 @@ module StateMachines
         {
           initial: state.initial?,
           final: state.final?,
-          value: state.value,
-          methods: state.methods.grep(/^#{state.name}_/).map(&:to_s)
+          value: state.value
         }
       end
 
@@ -135,21 +168,20 @@ module StateMachines
       end
 
       def add_transition(from, to, event, branch)
-        from_id = from ? from.to_s : 'nil_state'
-        to_id = to ? to.to_s : 'nil_state'
-
         guard_info = extract_guard_conditions(branch)
+        label = transition_label(event)
 
         transition = diagram.add_transition(
-          source_state_id: from_id.empty? ? 'nil_state' : from_id,
-          target_state_id: to_id.empty? ? 'nil_state' : to_id,
-          label: transition_label(event),
-          guard: guard_info[:display],
-          action: extract_action_info(branch, event)
+          source_state_id: self.class.state_id(from),
+          target_state_id: self.class.state_id(to),
+          label: diagram_text(label),
+          guard: diagram_text(guard_info[:display]),
+          action: diagram_text(extract_action_info(branch, event))
         )
 
         transition_data = {
           transition: transition,
+          label: label,
           from: from.to_s,
           to: to.to_s,
           event: event.name.to_s,
@@ -212,10 +244,11 @@ module StateMachines
           condition_tokens << "!#{token}" if token
         end
 
+        # Each state guard stays one group: its kind says how its requirements
+        # combine (if_any_state is an OR, unless_all_states a NOT ALL)
         branch.state_guards.each do |kind, requirements|
-          tokens = requirements.map { |machine, state| "#{machine}=#{state}" }
-          guard_conditions[kind] = tokens
-          condition_tokens.concat(tokens.map { |token| "#{kind} #{token}" })
+          guard_conditions[kind] = requirements.to_a
+          condition_tokens << self.class.state_guard_token(kind, requirements)
         end
 
         {
