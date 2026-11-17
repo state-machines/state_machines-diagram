@@ -8,7 +8,8 @@ Gem::Specification.new do |spec|
   spec.authors       = ['Abdelkader Boudih']
   spec.email         = ['terminale@gmail.com']
   spec.summary       = 'Diagram building for state machines'
-  spec.description   = 'Diagram module for state machines. Builds diagram representations of state machines that can be rendered in various formats'
+  spec.description   = 'Diagram module for state machines. Builds diagram representations of state machines ' \
+                       'that can be rendered in various formats'
   spec.homepage      = 'https://github.com/state-machines/state_machines-diagram'
   spec.license       = 'MIT'
   spec.required_ruby_version = '>= 4.0'
@@ -22,5 +23,9 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'bundler'
   spec.add_development_dependency 'minitest', '~> 6.0'
   spec.add_development_dependency 'rake'
+  spec.add_development_dependency 'rubocop', '~> 1.59'
+  spec.add_development_dependency 'rubocop-minitest', '~> 0.34'
+  spec.add_development_dependency 'rubocop-performance', '~> 1.20'
+  spec.add_development_dependency 'rubocop-rake', '~> 0.6'
   spec.metadata['rubygems_mfa_required'] = 'true'
 end

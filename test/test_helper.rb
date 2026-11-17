@@ -19,8 +19,10 @@ require_relative 'models/battle'
 # Set deterministic seed for reproducible test runs - can be overridden with --seed
 ENV['TESTOPTS'] ||= '--seed=12345'
 
-class StateMachines::TestCase < Minitest::Test
-  # Clean base test case for state machines diagram tests
+module StateMachines
+  class TestCase < Minitest::Test
+    # Clean base test case for state machines diagram tests
+  end
 end
 
 # The (source, target) pairs a machine performs, found by firing every event from every state
@@ -29,7 +31,7 @@ module PerformedTransitions
     machine = klass.state_machines[machine_name]
     attribute = machine.attribute
 
-    machine.states.map(&:name).compact.flat_map do |state|
+    machine.states.filter_map(&:name).flat_map do |state|
       machine.events.filter_map do |event|
         object = klass.new
         object.public_send(:"#{attribute}=", state.to_s)
@@ -41,7 +43,9 @@ module PerformedTransitions
   end
 end
 
-class Minitest::Test
-  include StateMachines::TestHelper
-  include PerformedTransitions
+module Minitest
+  class Test
+    include StateMachines::TestHelper
+    include PerformedTransitions
+  end
 end
