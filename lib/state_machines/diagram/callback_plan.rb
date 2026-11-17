@@ -20,7 +20,10 @@ module StateMachines
     # is listed on each transition, which always keeps the core's order.
     #
     # MachineSchema callbacks have no conditions: a conditional callback the
-    # core may run is refused.
+    # core may run is refused. So is an after_failure callback on an event of
+    # the schema: the core also runs it when the event finds no transition
+    # (no branch matches, or its guards reject), where generated code runs no
+    # on_error callback.
     class CallbackPlan
       # Whose callbacks may go machine-wide, tried in turn: all of the
       # machine's, its before and around ones, none
@@ -36,6 +39,7 @@ module StateMachines
           transitions.map { |from, to, branch| Edge.new(event, from, to, branch, sequence(event, from, to, branch)) }
         end
         @event_names = performed.keys.map { it.name.to_s }
+        refuse_failure_callbacks(performed.keys)
         lifted = LIFTS.lazy.map { |kinds| liftable(kinds) }.find { faithful?(it) }
         @lifted = lifted.to_h { [it.callback, it] }
         @machine_callbacks = lifted.select { |lift| @transitions.any? { lift.matches?(it) } }.flat_map(&:entries)
@@ -82,6 +86,17 @@ module StateMachines
                                "#{Labels.callback_text(step)} on #{event.name}"
         end
         steps
+      end
+
+      def refuse_failure_callbacks(events)
+        @machine.callbacks[:failure].each do |callback|
+          event = events.find { callback.branch.matches?(nil, on: it.name, guard: false) }
+          next unless event
+
+          raise ArgumentError, 'MachineSchema cannot express the after_failure callback ' \
+                               "#{callback.callables.map { Labels.action_label(it) }.join(', ')} on #{event.name}: " \
+                               'the core also runs it when the event finds no transition'
+        end
       end
 
       def own_steps(edge)

@@ -469,6 +469,31 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert_match(/cannot express the conditional callback chant \(if ritual\?\)/, error.message)
   end
 
+  def test_a_failure_callback_on_an_event_of_the_schema_is_refused
+    error = assert_raises(ArgumentError) do
+      schema_of do
+        state_machine :state, initial: :idle do
+          after_failure on: :go, do: :alert
+          event(:go) { transition idle: :a, if: :ready? }
+        end
+      end
+    end
+    assert_equal 'MachineSchema cannot express the after_failure callback alert on go: ' \
+                 'the core also runs it when the event finds no transition', error.message
+  end
+
+  def test_a_failure_callback_on_an_event_left_out_is_no_matter
+    schema = schema_of do
+      state_machine :state, initial: :idle do
+        after_failure on: :never, do: :alert
+        event(:go) { transition idle: :a }
+        event :never
+      end
+    end
+
+    assert_equal(%w[go], schema[:events].map { it[:name] })
+  end
+
   def test_an_event_without_transitions_is_left_out
     refute relay_events.key?('never')
   end

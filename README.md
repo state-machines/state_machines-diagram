@@ -171,8 +171,10 @@ out. States are named by their diagram id, so the nil state (`nil_state`) and a 
 named `:nil` stay two states. `final_states` lists the states the core calls final that
 no transition leaves: the core also calls a state with only loopbacks final, but a
 loopback still fires, and MachineSchema allows no transition out of a final state. A
-dynamic initial state or a callback with its own conditions the core may run (schema
-callbacks have none) cannot be described and raise `ArgumentError`.
+dynamic initial state, a callback with its own conditions the core may run (schema
+callbacks have none), or an `after_failure` callback on an event of the schema (the core
+also runs it when the event finds no transition; generated code runs `on_error` only for
+a selected one) cannot be described and raise `ArgumentError`.
 
 `bundle exec rake rust_schema_check` (cargo and a state-machines-rs checkout, set by
 `STATE_MACHINES_RS`, default `../state-machines-rs`) reads every fixture's schema back
