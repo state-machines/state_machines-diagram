@@ -1,12 +1,14 @@
 # frozen_string_literal: true
 
 require 'json'
-require_relative 'introspection'
+require_relative 'builder'
 
 module StateMachines
   module Diagram
     # Builds a MachineSchema-compatible hash from a state_machines machine.
-    # This format is compatible with the state-machines-rs CLI tool.
+    # This format is compatible with the state-machines-rs CLI tool. States
+    # are named by their diagram id (Builder.state_id), which is distinct for
+    # distinct states: the nil state is "nil_state", a state named :nil "nil".
     class SchemaBuilder
       attr_reader :machine, :options
 
@@ -15,14 +17,13 @@ module StateMachines
         @options = options
       end
 
+      # name, initial, states and events are required, even when empty;
+      # final_states is optional
       def build
-        {
-          name: machine_name,
-          initial: initial_state,
-          states: state_names,
-          final_states: final_state_names,
-          events: build_events
-        }.reject { |_key, value| value.respond_to?(:empty?) && value.empty? }
+        events = build_events
+        finals = final_state_names(events)
+        { name: machine_name, initial: initial_state, states: state_names, events: events }
+          .then { finals.empty? ? it : it.merge(final_states: finals) }
       end
 
       def to_json(*)
@@ -41,16 +42,23 @@ module StateMachines
         state = Introspection.states_of(machine).find(&:initial?)
         raise ArgumentError, "MachineSchema needs a static initial state; #{machine_name} has none" unless state
 
-        Labels.state_text(state.name)
+        schema_id(state.name)
       end
 
       def state_names
-        Introspection.states_of(machine).map { Labels.state_text(it.name) }
+        Introspection.states_of(machine).map { schema_id(it.name) }
       end
 
-      # The states the core calls final (State#final?): no transition leaves them
-      def final_state_names
-        Introspection.states_of(machine).select(&:final?).map { Labels.state_text(it.name) }
+      def schema_id(name) = Builder.state_id(name)
+
+      # The states the core calls final (State#final?) that no transition
+      # leaves. The core still calls a state final when its only transitions
+      # are loopbacks; MachineSchema refuses any outgoing transition from a
+      # final state, and a loopback still fires its event and callbacks, so
+      # such a state is not final there.
+      def final_state_names(events)
+        sources = events.flat_map { |event| event[:transitions].flat_map { it[:sources] } }
+        Introspection.states_of(machine).select(&:final?).map { schema_id(it.name) } - sources
       end
 
       # The core has no event-level guards: every guard belongs to one branch.
@@ -102,16 +110,33 @@ module StateMachines
         end
 
         pairs = performed.map do |from, to, _branch|
-          [from, to, Introspection.callback_labels(machine, from, to, event.name)]
+          [from, to, callback_names(from, to, event)]
         end
         pairs.group_by { |_from, to, callbacks| [to, callbacks] }.map do |(target, callbacks), group|
           {
-            sources: group.map { |from, _to, _callbacks| Labels.state_text(from) },
-            target: Labels.state_text(target),
+            sources: group.map { |from, _to, _callbacks| schema_id(from) },
+            target: schema_id(target),
             guards: guards,
             unless: conditions[:unless],
             **callbacks
           }.reject { |_key, value| value.empty? }
+        end
+      end
+
+      # MachineSchema callbacks are names of functions that run whenever the
+      # transition does; it has no place for a callback's own conditions. An
+      # unconditional name would claim the callback always runs, a marker in
+      # the name would name no function, so a conditional callback is refused.
+      def callback_names(from, to, event)
+        Introspection.callbacks(machine, from, to, event.name).transform_values do |list|
+          list.map do |callback|
+            if Introspection.conditional?(callback[:conditions])
+              raise ArgumentError, 'MachineSchema cannot express the conditional callback ' \
+                                   "#{Labels.callback_text(callback)} on #{event.name}"
+            end
+
+            callback[:label]
+          end
         end
       end
     end

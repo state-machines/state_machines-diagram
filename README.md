@@ -67,8 +67,11 @@ Transitions:
 Each condition is shown on its own: the transition needs every `if:` to pass and
 no `unless:` to, as the core requires of an Array condition. State guards
 (`if_state:`, `unless_any_state:`, ...) are shown under their kind, with their
-requirements together: `(if_any_state: gate=open, alarm=on)`. `action:` lists the
-callbacks the core runs on that transition, before, around, then after.
+requirements together: `(if_any_state: gate=open, alarm=on)`. As in the core,
+`nil`, `false` and `[]` are no condition, and a condition the core cannot
+evaluate (`if: true`) raises `ArgumentError`. `action:` lists the callbacks the
+core runs on that transition, before, around, then after; a callback with its own
+conditions shows them: `audit (if enabled?)`.
 
 `draw` takes `io:` (default `$stdout`), `format:` and `human_names: true`, which
 labels states and events by their human names.
@@ -129,8 +132,13 @@ conditions (`guards`, `unless`) and the callbacks the core runs on it
 (`before`, `around`, `after`). The core takes an event's first branch whose
 source and guards match, so an event with several candidates from one source is
 `branching: true`, its unguarded candidate the `fallback`; a source an unguarded
-branch takes never reaches a later one, which is left out. A dynamic initial
-state cannot be described and raises `ArgumentError`.
+branch takes never reaches a later one, which is left out. States are named by
+their diagram id, so the nil state (`nil_state`) and a state named `:nil` stay
+two states. `final_states` lists the states the core calls final that no
+transition leaves: the core also calls a state with only loopbacks final, but a
+loopback still fires, and MachineSchema allows no transition out of a final
+state. A dynamic initial state, or a callback with its own conditions (the
+schema's callbacks always run), cannot be described and raises `ArgumentError`.
 
 ```ruby
 StateMachines::Diagram::Renderer.machine_schema(Order.state_machine(:status))
@@ -138,7 +146,8 @@ StateMachines::Diagram::Renderer.machine_schema(Order.state_machine(:status))
 #     events: [{name: "process", transitions: [{sources: ["pending"], target: "processing", guards: ["payment_cleared?"]}]},
 #              {name: "ship", transitions: [{sources: ["processing"], target: "shipped", unless: ["on_hold?", "address_missing?"],
 #                                            after: ["send_notification"]}]},
-#              {name: "cancel", transitions: [{sources: ["pending", "processing"], target: "cancelled"}]}]}
+#              {name: "cancel", transitions: [{sources: ["pending", "processing"], target: "cancelled"}]}],
+#     final_states: ["shipped", "cancelled"]}
 ```
 
 Any other format raises `ArgumentError`, as does `:machine_schema` for part of a machine.

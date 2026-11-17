@@ -190,7 +190,8 @@ class SchemaBuilderTest < StateMachines::TestCase
     check = schema[:events].first
 
     refute check.key?(:guards), 'the core has no event-level guards'
-    assert_equal({ sources: ['nil'], target: 'idle', guards: ['armed', 'staffed', 'if_any_state (gate=open, alarm=on)'],
+    assert_equal({ sources: ['nil_state'], target: 'idle',
+                   guards: ['armed', 'staffed', 'if_any_state (gate=open, alarm=on)'],
                    unless: ['storm'] }, check[:transitions].first)
   end
 
@@ -205,7 +206,8 @@ class SchemaBuilderTest < StateMachines::TestCase
   def test_the_nil_state_can_be_initial
     schema = StateMachines::Diagram::SchemaBuilder.new(Gatehouse.state_machines[:state]).build
 
-    assert_equal 'nil', schema[:initial]
+    # Named by its diagram id, apart from a state named :nil
+    assert_equal 'nil_state', schema[:initial]
   end
 
   def test_a_dynamic_initial_state_is_refused_not_evaluated
@@ -276,6 +278,72 @@ class SchemaBuilderTest < StateMachines::TestCase
     schema = StateMachines::Diagram::SchemaBuilder.new(Relay.state_machines[:state]).build
 
     assert_equal %w[c d], schema[:final_states]
+  end
+
+  def schema_of(&)
+    klass = Class.new do
+      attr_accessor :state
+
+      class_eval(&)
+    end
+    StateMachines::Diagram::SchemaBuilder.new(klass.state_machines[:state]).build
+  end
+
+  def test_a_state_left_only_by_loopbacks_is_not_final
+    schema = schema_of do
+      state_machine :state, initial: :idle do
+        state :done
+        event(:wait) { transition all - :done => same }
+        event(:finish) { transition idle: :done }
+      end
+    end
+    loop_only = schema_of { state_machine(:state, initial: :idle) { event(:wait) { transition all => same } } }
+
+    assert_equal %w[done], schema[:final_states]
+    refute loop_only.key?(:final_states)
+  end
+
+  def test_required_fields_stay_when_empty
+    schema = schema_of { state_machine(:state, initial: :idle) { event(:never) } }
+
+    assert_equal({ name: '#state', initial: 'idle', states: %w[idle], events: [], final_states: %w[idle] }, schema)
+  end
+
+  def test_nil_and_a_state_named_nil_get_distinct_names
+    schema = schema_of do
+      state_machine :state, initial: nil do
+        state :nil
+        event(:go) { transition nil => :nil }
+      end
+    end
+
+    assert_equal %w[nil_state nil], schema[:states]
+    assert_equal [{ sources: %w[nil_state], target: 'nil' }], schema[:events].first[:transitions]
+  end
+
+  def test_a_false_or_empty_condition_is_no_condition
+    schema = schema_of do
+      state_machine :state, initial: :idle do
+        event(:go) do
+          transition idle: :a, if: false, unless: []
+          transition idle: :b
+        end
+      end
+    end
+
+    assert_equal({ name: 'go', transitions: [{ sources: %w[idle], target: 'a' }] }, schema[:events].first)
+  end
+
+  def test_a_conditional_callback_is_refused
+    error = assert_raises(ArgumentError) do
+      schema_of do
+        state_machine :state, initial: :idle do
+          before_transition on: :go, if: :enabled?, do: :audit
+          event(:go) { transition idle: :a }
+        end
+      end
+    end
+    assert_equal 'MachineSchema cannot express the conditional callback audit (if enabled?) on go', error.message
   end
 
   def test_an_event_without_transitions_is_left_out
