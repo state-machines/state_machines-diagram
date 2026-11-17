@@ -275,6 +275,25 @@ class BuilderTest < StateMachines::TestCase
     assert_equal 1, builder.transition_metadata.size
   end
 
+  class Shadowed
+    attr_accessor :state
+
+    state_machine :state, initial: :a do
+      state :b, :c, :d
+
+      event :go do
+        transition a: :b
+        transition %i[a b] => :c
+        transition :c => :d, [:c] => :a
+      end
+    end
+  end
+
+  def test_draws_only_what_the_core_performs_from_each_source
+    assert_equal performed_pairs(Shadowed), drawn_pairs(Shadowed)
+    assert_equal [%w[a b], %w[b c], %w[c d]], drawn_pairs(Shadowed)
+  end
+
   def test_an_anonymous_owner_leaves_no_blank_in_the_title
     klass = Class.new do
       attr_accessor :state

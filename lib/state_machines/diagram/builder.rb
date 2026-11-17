@@ -69,9 +69,7 @@ module StateMachines
       # Every (source, target, event, branch) the machine draws
       def each_transition
         machine.events.flat_map do |event|
-          event.branches.flat_map do |branch|
-            transition_pairs(machine, branch).map { |from, to| [from, to, event, branch] }
-          end
+          event_transitions(machine, event).map { |from, to, branch| [from, to, event, branch] }
         end
       end
 

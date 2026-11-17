@@ -19,7 +19,9 @@ module StateMachines
         machine.states.by_priority.uniq
       end
 
-      # The (source, target) pairs a branch performs
+      # The (source, target) pairs a branch performs. From one source the
+      # core takes the first requirement that matches, so a later one from
+      # the same source is never performed.
       def transition_pairs(machine, branch)
         state_names = machine.states.map(&:name)
         source_names = states_of(machine).map(&:name)
@@ -28,7 +30,23 @@ module StateMachines
           requirement[:from].filter(source_names).map do |from|
             [from, to_state_for(requirement, from, state_names)]
           end
+        end.uniq(&:first)
+      end
+
+      # The (source, target, branch) transitions an event performs, in order.
+      # The core takes the first branch whose source and guards match, so a
+      # source an unguarded branch takes never reaches a later branch.
+      def event_transitions(machine, event)
+        settled = []
+        event.branches.flat_map do |branch|
+          pairs = transition_pairs(machine, branch).reject { settled.include?(it.first) }
+          settled |= pairs.map(&:first) unless guarded?(branch)
+          pairs.map { |from, to| [from, to, branch] }
         end
+      end
+
+      def guarded?(branch)
+        guard_conditions(branch).values.any? { !it.empty? }
       end
 
       def to_state_for(requirement, from, state_names)
