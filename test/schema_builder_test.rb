@@ -44,6 +44,7 @@ class SchemaBuilderTest < StateMachines::TestCase
     schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
 
     event_names = schema[:events].map { |e| e[:name] }
+
     assert_includes event_names, 'wake_up'
     assert_includes event_names, 'find_treasure'
     assert_includes event_names, 'enrage'
@@ -54,9 +55,10 @@ class SchemaBuilderTest < StateMachines::TestCase
     schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
 
     wake_up_event = schema[:events].find { |e| e[:name] == 'wake_up' }
+
     assert wake_up_event
     assert wake_up_event[:transitions]
-    assert wake_up_event[:transitions].any?
+    assert_predicate wake_up_event[:transitions], :any?
   end
 
   def test_transition_has_sources_and_target
@@ -91,6 +93,7 @@ class SchemaBuilderTest < StateMachines::TestCase
 
     # Should be valid JSON
     parsed = JSON.parse(json)
+
     assert_equal 'Dragon#mood', parsed['name']
   end
 
@@ -102,12 +105,13 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert schema.key?(:initial)
     assert schema.key?(:states)
     assert schema.key?(:events)
-    assert schema.key?(:superstates)
+    # MachineSchema's superstates default to empty; the core has none
+    refute schema.key?(:superstates)
     # MachineSchema's async_mode defaults to false; the core has no async mode
     refute schema.key?(:async_mode)
 
     # States should be array of strings
-    assert schema[:states].all? { |s| s.is_a?(String) }
+    assert(schema[:states].all?(String))
 
     # Events should have name and transitions
     schema[:events].each do |event|
@@ -129,9 +133,11 @@ class SchemaBuilderTest < StateMachines::TestCase
     )
 
     output = io.string
+
     assert output.start_with?('{')
 
     parsed = JSON.parse(output)
+
     assert_equal 'Dragon#flight', parsed['name']
     assert_equal 'grounded', parsed['initial']
   end
@@ -148,12 +154,70 @@ class SchemaBuilderTest < StateMachines::TestCase
 
     # take_fire_damage transitions from multiple states to suppressed
     fire_event = schema[:events].find { |e| e[:name] == 'take_fire_damage' }
+
     assert fire_event
 
     # Should have transition(s) with multiple sources
     suppressed_transition = fire_event[:transitions].find { |t| t[:target] == 'suppressed' }
+
     assert suppressed_transition
-    assert suppressed_transition[:sources].length > 1, 'Should group multiple source states'
+    assert_operator suppressed_transition[:sources].length, :>, 1, 'Should group multiple source states'
+  end
+
+  class Gatehouse
+    attr_accessor :state, :gate, :alarm
+
+    state_machine :gate, initial: :closed do
+      state :open
+    end
+
+    state_machine :alarm, initial: :off do
+      state :on
+    end
+
+    state_machine :state, initial: nil do
+      state :idle, :sealed
+
+      event :check do
+        transition nil => :idle, if: %i[armed staffed], unless: %i[storm], if_any_state: { gate: :open, alarm: :on }
+        transition idle: all - :sealed, unless_state: { gate: :closed }
+      end
+    end
+  end
+
+  def test_state_guards_and_array_conditions_reach_the_transition
+    schema = StateMachines::Diagram::SchemaBuilder.new(Gatehouse.state_machines[:state]).build
+    check = schema[:events].first
+
+    refute check.key?(:guards), 'the core has no event-level guards'
+    assert_equal({ sources: ['nil'], target: 'idle', guards: ['armed', 'staffed', 'if_any_state (gate=open, alarm=on)'],
+                   unless: ['storm'] }, check[:transitions].first)
+  end
+
+  def test_targets_are_those_the_core_reaches
+    schema = StateMachines::Diagram::SchemaBuilder.new(Gatehouse.state_machines[:state]).build
+
+    # The core moves to the first state the blacklist allows, the source first
+    assert_equal [{ sources: ['idle'], target: 'idle', guards: ['unless_state gate=closed'] }],
+                 schema[:events].first[:transitions].drop(1)
+  end
+
+  def test_the_nil_state_can_be_initial
+    schema = StateMachines::Diagram::SchemaBuilder.new(Gatehouse.state_machines[:state]).build
+
+    assert_equal 'nil', schema[:initial]
+  end
+
+  def test_a_dynamic_initial_state_is_not_evaluated
+    klass = Class.new do
+      attr_accessor :state
+
+      state_machine initial: lambda(&:pick) do
+        state :a, :b
+      end
+    end
+
+    assert_equal 'a', StateMachines::Diagram::SchemaBuilder.new(klass.state_machines[:state]).build[:initial]
   end
 
   def test_loopback_transitions

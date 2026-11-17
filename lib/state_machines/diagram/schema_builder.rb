@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'json'
+require_relative 'introspection'
+
 module StateMachines
   module Diagram
     # Builds a MachineSchema-compatible hash from a state_machines machine.
@@ -17,13 +20,12 @@ module StateMachines
           name: machine_name,
           initial: initial_state,
           states: state_names,
-          superstates: build_superstates,
           events: build_events
         }.compact
       end
 
-      def to_json(*args)
-        build.to_json(*args)
+      def to_json(*)
+        build.to_json(*)
       end
 
       private
@@ -32,120 +34,41 @@ module StateMachines
         "#{machine.owner_class.name}##{machine.name}"
       end
 
+      # A dynamic initial state depends on the object, and no state is
+      # marked initial; the schema needs one, so the first state stands in
       def initial_state
-        state = machine.initial_state(machine.owner_class)
-        if state.respond_to?(:name)
-          state.name&.to_s
-        else
-          state&.to_s
-        end || machine.states.first&.name&.to_s
+        states = Introspection.states_of(machine)
+        state = states.find(&:initial?) || states.first
+        Labels.state_text(state.name) if state
       end
 
       def state_names
-        machine.states.by_priority.map { |s| s.name&.to_s || 'nil' }
+        Introspection.states_of(machine).map { Labels.state_text(it.name) }
       end
 
-      def build_superstates
-        # state_machines gem doesn't have native superstate support
-        # Return empty array for compatibility
-        []
-      end
-
+      # The core has no event-level guards: every guard belongs to one branch
       def build_events
         machine.events.map do |event|
+          { name: event.name.to_s, transitions: event.branches.flat_map { build_branch_transitions(it) } }
+        end
+      end
+
+      # One transition per target of the branch, with the sources that reach
+      # it. A branch's guards all must hold: its if: conditions and state
+      # guards go in guards, its unless: conditions in unless.
+      def build_branch_transitions(branch)
+        conditions = Introspection.guard_conditions(branch)
+        guards = conditions[:if] + conditions.except(:if, :unless).map do |kind, value|
+          Labels.state_guard_token(kind, value)
+        end
+
+        Introspection.transition_pairs(machine, branch).group_by(&:last).map do |target, pairs|
           {
-            name: event.name.to_s,
-            transitions: build_event_transitions(event),
-            guards: extract_event_guards(event),
-            payload: nil
-          }.tap do |h|
-            h.delete(:guards) if h[:guards].empty?
-            h.delete(:payload) if h[:payload].nil?
-          end
-        end
-      end
-
-      def build_event_transitions(event)
-        transitions = []
-
-        event.branches.each do |branch|
-          branch.state_requirements.each do |requirement|
-            valid_states = machine.states.by_priority.map(&:name)
-            from_states = requirement[:from].filter(valid_states)
-            to_states = requirement[:to].values
-
-            # Handle loopback transitions (empty to_states means same state)
-            to_states = from_states if to_states.empty?
-
-            to_states.each do |to_state|
-              transitions << {
-                sources: from_states.map { |s| s&.to_s || 'nil' },
-                target: to_state&.to_s || 'nil',
-                guards: extract_branch_guards(branch),
-                unless: extract_branch_unless(branch)
-              }.tap do |h|
-                h.delete(:guards) if h[:guards].empty?
-                h.delete(:unless) if h[:unless].empty?
-              end
-            end
-          end
-        end
-
-        # Merge transitions with same target
-        merge_transitions(transitions)
-      end
-
-      def merge_transitions(transitions)
-        # Group by target and merge sources
-        grouped = transitions.group_by { |t| [t[:target], t[:guards], t[:unless]] }
-
-        grouped.map do |(_target, _guards, _unless), group|
-          sources = group.flat_map { |t| t[:sources] }.uniq
-          base = group.first.dup
-          base[:sources] = sources
-          base
-        end
-      end
-
-      def extract_event_guards(event)
-        guards = []
-        event.branches.each do |branch|
-          guards.concat(extract_branch_guards(branch))
-        end
-        guards.uniq
-      end
-
-      def extract_branch_guards(branch)
-        guards = []
-        if branch.if_condition
-          guards << normalize_condition(branch.if_condition)
-        end
-        guards.compact
-      end
-
-      def extract_branch_unless(branch)
-        guards = []
-        if branch.unless_condition
-          guards << normalize_condition(branch.unless_condition)
-        end
-        guards.compact
-      end
-
-      def normalize_condition(condition)
-        case condition
-        when Symbol
-          name = condition.to_s
-          name += '?' unless name.end_with?('?')
-          name
-        when Proc, Method
-          if condition.respond_to?(:source_location) && condition.source_location
-            file, line = condition.source_location
-            "lambda@#{File.basename(file)}:#{line}"
-          else
-            'lambda'
-          end
-        else
-          condition.to_s
+            sources: pairs.map { |from, _to| Labels.state_text(from) },
+            target: Labels.state_text(target),
+            guards: guards,
+            unless: conditions[:unless]
+          }.reject { |_key, value| value.empty? }
         end
       end
     end

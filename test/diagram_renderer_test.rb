@@ -18,19 +18,6 @@ class DiagramRendererTest < StateMachines::TestCase
     end
   end
 
-  def test_per_state_diagram_draws_every_transition_touching_that_state
-    machine = Sentinel.state_machines[:state]
-    performed = performed_pairs(Sentinel)
-
-    machine.states.map(&:name).each do |state|
-      io = StringIO.new
-      StateMachines::Diagram::Renderer.draw_state(machine.states[state], nil, {}, io)
-      drawn = io.string.lines.grep(/->/).map { |line| line[/(\S+) -> (\S+)/, 0].split(' -> ') }.uniq.sort
-
-      assert_equal performed.select { |pair| pair.include?(state.to_s) }, drawn, "draw_state(#{state})"
-    end
-  end
-
   def setup
     @dragon = Dragon.new
     @mage = Mage.new
@@ -46,11 +33,25 @@ class DiagramRendererTest < StateMachines::TestCase
     @regiment = nil
   end
 
+  def test_per_state_diagram_draws_every_transition_touching_that_state
+    machine = Sentinel.state_machines[:state]
+    performed = performed_pairs(Sentinel)
+
+    machine.states.map(&:name).each do |state|
+      io = StringIO.new
+      StateMachines::Diagram::Renderer.draw_state(machine.states[state], nil, {}, io)
+      drawn = io.string.lines.grep(/->/).map { |line| line[/(\S+) -> (\S+)/, 0].split(' -> ') }.uniq.sort
+
+      assert_equal performed.select { |pair| pair.include?(state.to_s) }, drawn, "draw_state(#{state})"
+    end
+  end
+
   def test_draw_machine_outputs_text_by_default
     io = StringIO.new
     StateMachines::Diagram::Renderer.draw_machine(@dragon.class.state_machine(:mood), io: io)
 
     output = io.string
+
     assert_includes output, 'Dragon mood State Machine'
     assert_includes output, 'States:'
     assert_includes output, 'sleeping [*]'
@@ -66,12 +67,14 @@ class DiagramRendererTest < StateMachines::TestCase
     )
 
     output = io.string
+
     assert output.start_with?('{')
     assert output.end_with?("}\n")
 
     # Parse JSON to verify structure
     require 'json'
     data = JSON.parse(output)
+
     assert_equal 'state_diagram', data['type']
     assert data['version']
     assert data['checksum']
@@ -102,6 +105,7 @@ class DiagramRendererTest < StateMachines::TestCase
     )
 
     output = io.string
+
     assert_includes output, 'idle [*]'
     assert_includes output, 'dead'
     assert_includes output, 'engage'
@@ -116,6 +120,7 @@ class DiagramRendererTest < StateMachines::TestCase
     StateMachines::Diagram::Renderer.draw_state(state, nil, {}, io)
 
     output = io.string
+
     assert_includes output, 'State: sleeping'
   end
 
@@ -126,6 +131,7 @@ class DiagramRendererTest < StateMachines::TestCase
     StateMachines::Diagram::Renderer.draw_event(event, nil, {}, io)
 
     output = io.string
+
     assert_includes output, 'Event: wake_up'
   end
 
@@ -152,6 +158,7 @@ class DiagramRendererTest < StateMachines::TestCase
     )
 
     output = io.string
+
     assert_includes output, 'apprentice'
     assert_includes output, 'fire'
     assert_includes output, 'ember'
@@ -171,6 +178,7 @@ class DiagramRendererTest < StateMachines::TestCase
 
     # Find a transition with callbacks (actions)
     transition = data['data']['transitions'].find { |t| t['label'] == 'cast_spell' }
+
     assert transition, 'Should find a cast_spell transition'
     assert transition['action'], 'cast_spell transition should have an action'
   end
@@ -190,6 +198,7 @@ class DiagramRendererTest < StateMachines::TestCase
     )
 
     output = io.string
+
     assert_includes output, 'preparation'
     assert_includes output, 'aftermath'
     assert_includes output, 'escalate'
@@ -201,8 +210,8 @@ class DiagramRendererTest < StateMachines::TestCase
 
     assert_kind_of ::Diagrams::StateDiagram, diagram
     assert_equal 'Troll regeneration State Machine', diagram.title
-    assert diagram.states.any?
-    assert diagram.transitions.any?
+    assert_predicate diagram.states, :any?
+    assert_predicate diagram.transitions, :any?
   end
 
   def test_multiple_from_states_in_transition
@@ -255,10 +264,11 @@ class DiagramRendererTest < StateMachines::TestCase
     )
 
     output = io.string
-    assert output.include?('id:')
-    assert output.include?('title:')
-    assert output.include?('states:')
-    assert output.include?('transitions:')
+
+    assert_includes output, 'id:'
+    assert_includes output, 'title:'
+    assert_includes output, 'states:'
+    assert_includes output, 'transitions:'
   end
 
   def test_state_with_nil_name
@@ -281,6 +291,7 @@ class DiagramRendererTest < StateMachines::TestCase
     )
 
     output = io.string
+
     assert_includes output, '  - nil [*]'
     assert_includes output, 'nil -> active [activate]'
   end
@@ -293,15 +304,12 @@ class DiagramRendererTest < StateMachines::TestCase
       format: :json
     )
 
-    require 'json'
     data = JSON.parse(io.string)
+    conditions = data['metadata']['transitions'].map { it['conditions'] }
 
-    # Get the first transition that has conditions
-    transitions = data['data']['transitions']
-    assert transitions.any?, 'Should have transitions'
-
-    # The conditions are stored in our metadata, not in the diagram directly
-    # We need to check the builder's metadata
+    # The guard text is in the diagram, its structure in the metadata
+    assert_includes conditions, { 'if' => [], 'unless' => ['iron_will?'] }
+    assert_includes data['data']['transitions'].map { it['guard'] }, '!iron_will?'
   end
 
   def test_should_generate_enhanced_output_with_guard_conditions
@@ -316,43 +324,41 @@ class DiagramRendererTest < StateMachines::TestCase
 
     output = io.string
 
-    # Verify that guard conditions are present in the output
-    assert output.include?('if:'), "Output should contain 'if:' guard conditions"
-    assert output.include?('unless:'), "Output should contain 'unless:' guard conditions"
-
     # Verify specific guard conditions are rendered correctly
     assert_includes output, '(if: can_fight?)', "Should show 'if: can_fight?' guard condition"
     assert_includes output, '(unless: spell_locked?)', "Should show 'unless: spell_locked?' guard condition"
     assert_includes output, '(if: interrupt_rest?)', "Should show 'if: interrupt_rest?' guard condition"
 
     # Verify action callbacks are also included for transitions that have them
-    assert output.include?('action:'), "Output should contain 'action:' for callbacks"
+    assert_includes output, 'action:', "Output should contain 'action:' for callbacks"
 
     # Count the transitions with guard conditions to ensure they're all rendered
     guard_transitions = output.split("\n").select do |line|
       line.include?('->') && (line.include?('if:') || line.include?('unless:'))
     end
-    assert guard_transitions.length >= 8,
-           "Should have at least 8 transitions with guard conditions, got #{guard_transitions.length}"
+
+    assert_operator guard_transitions.length, :>=, 8,
+                    "Should have at least 8 transitions with guard conditions, got #{guard_transitions.length}"
 
     # Verify the structure is correct - transitions should have event names in brackets
     transition_lines = output.split("\n").select { |line| line.include?('->') }
     transition_lines.each do |line|
-      assert line.include?('['), "Transition line should contain event name in brackets: #{line}"
-      assert line.include?(']'), "Transition line should contain closing bracket: #{line}"
+      assert_includes line, '[', "Transition line should contain event name in brackets: #{line}"
+      assert_includes line, ']', "Transition line should contain closing bracket: #{line}"
     end
   end
+
   def test_text_shows_the_names_a_diagram_cannot_hold
     klass = Class.new do
       attr_accessor :state
 
       state_machine :state, initial: :idle do
         event :go do
-          transition idle: :"*"
+          transition idle: :*
         end
 
-        event :" " do
-          transition :"*" => :" "
+        event :' ' do
+          transition '*': :' '
         end
       end
     end
@@ -361,10 +367,91 @@ class DiagramRendererTest < StateMachines::TestCase
     StateMachines::Diagram::Renderer.draw_machine(klass.state_machine(:state), io: io)
 
     output = io.string
+
     assert_includes output, "  - *\n"
     assert_includes output, "  -   (O)\n"
     assert_includes output, '  - idle -> * [go]'
     assert_includes output, '  - * ->   [ ]'
+  end
+
+  def test_json_output_loads_back_with_a_valid_checksum
+    machine = Character.state_machine(:status)
+    io = StringIO.new
+    StateMachines::Diagram::Renderer.draw_machine(machine, io: io, format: :json)
+
+    loaded = Diagrams::Base.from_json(io.string)
+
+    assert_equal StateMachines::Diagram::Builder.new(machine).build, loaded
+    assert_equal loaded.checksum, JSON.parse(io.string)['checksum']
+  end
+
+  def test_yaml_output_loads_back_with_safe_load
+    require 'yaml'
+    machine = Character.state_machine(:status)
+    io = StringIO.new
+    StateMachines::Diagram::Renderer.draw_machine(machine, io: io, format: :yaml)
+
+    assert_equal StateMachines::Diagram::Builder.new(machine).build, Diagrams::Base.from_h(YAML.safe_load(io.string))
+  end
+
+  def test_json_metadata_keeps_structured_guards_and_callbacks_beside_the_diagram
+    io = StringIO.new
+    StateMachines::Diagram::Renderer.draw_machine(BuilderTest::Vault.state_machine(:state), io: io, format: :json)
+
+    document = JSON.parse(io.string)
+
+    assert_equal(%w[locked opened], document['metadata']['states'].map { it['name'] })
+    open = document['metadata']['transitions'].first
+
+    assert_equal({ 'if' => %w[key_turned code_entered], 'unless' => %w[alarm jammed] }, open['conditions'])
+    assert_equal %w[wrap], open['callbacks']['around']
+    assert_equal document['data']['transitions'].size, document['metadata']['transitions'].size
+  end
+
+  def test_json_metadata_keeps_state_guard_requirements
+    io = StringIO.new
+    StateMachines::Diagram::Renderer.draw_machine(SchemaBuilderTest::Gatehouse.state_machine(:state), io: io,
+                                                                                                      format: :json)
+
+    conditions = JSON.parse(io.string)['metadata']['transitions'].first['conditions']
+
+    assert_equal({ 'gate' => 'open', 'alarm' => 'on' }, conditions['if_any_state'])
+  end
+
+  def test_text_shows_array_conditions_and_state_guards_one_by_one
+    io = StringIO.new
+    StateMachines::Diagram::Renderer.draw_machine(SchemaBuilderTest::Gatehouse.state_machine(:state), io: io)
+
+    assert_includes io.string, '  - nil -> idle [check] (if: armed) (if: staffed) (unless: storm) ' \
+                               '(if_any_state: gate=open, alarm=on)'
+  end
+
+  def test_branch_draws_through_the_core
+    machine = BuilderTest::Vault.state_machine(:state)
+    event = machine.events[:open]
+    io = StringIO.new
+
+    diagram = event.branches.first.draw(nil, event, [], io)
+
+    assert_kind_of Diagrams::StateDiagram, diagram
+    assert io.string.start_with?("Event: open, branch 1\n")
+    assert_includes io.string, '  - locked -> opened [open]'
+  end
+
+  def test_an_unknown_format_is_refused
+    error = assert_raises(ArgumentError) do
+      StateMachines::Diagram::Renderer.draw_machine(Character.state_machine(:status), io: StringIO.new,
+                                                                                      format: :mermaid)
+    end
+    assert_match(/unknown format :mermaid/, error.message)
+  end
+
+  def test_machine_schema_is_refused_for_part_of_a_machine
+    state = Character.state_machine(:status).states[:idle]
+
+    assert_raises(ArgumentError) do
+      StateMachines::Diagram::Renderer.draw_state(state, nil, { format: :machine_schema }, StringIO.new)
+    end
   end
 
   def test_text_marks_a_state_both_initial_and_final

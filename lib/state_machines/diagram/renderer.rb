@@ -1,276 +1,120 @@
 # frozen_string_literal: true
 
 require_relative 'builder'
+require_relative 'document'
 require_relative 'schema_builder'
-require 'set'
 
 module StateMachines
   module Diagram
+    # The machine renderer: writes a machine, state, event or branch as text
+    # (the default), as diagram 0.4's JSON or YAML document, or as a
+    # state-machines-rs MachineSchema (format: :machine_schema).
     module Renderer
+      FORMATS = [nil, :text, :json, :yaml, :machine_schema].freeze
+
       module_function
 
       def draw_machine(machine, io: $stdout, **options)
-        diagram, builder = build_state_diagram(machine, options)
-        output_diagram(diagram, io, options, builder)
-        diagram
+        builder = Builder.new(machine, options)
+        builder.build
+        output_diagram(builder, io, options)
+        builder.diagram
       end
 
-      def build_state_diagram(machine, options)
+      def draw_state(state, _graph, options = {}, io = $stdout)
+        builder = Builder.new(state.machine, options)
+        builder.build_state(state)
+        output_diagram(builder, io, options)
+        builder.diagram
+      end
+
+      def draw_event(event, _graph, options = {}, io = $stdout)
+        builder = Builder.new(event.machine, options)
+        builder.build_event(event)
+        output_diagram(builder, io, options)
+        builder.diagram
+      end
+
+      def draw_branch(branch, _graph, event, _valid_states, io = $stdout)
+        builder = Builder.new(event.machine)
+        builder.build_branch(branch, event)
+        output_diagram(builder, io, {})
+        builder.diagram
+      end
+
+      # The whole machine's diagram and the builder holding its metadata
+      def build_state_diagram(machine, options = {})
         builder = Builder.new(machine, options)
-        diagram = builder.build
-        [diagram, builder]
+        [builder.build, builder]
       end
 
       def machine_schema(machine, options = {})
         SchemaBuilder.new(machine, options).build
       end
 
-      def output_diagram(diagram, io, options, builder = nil)
+      # Writes what +builder+ built in options[:format]
+      def output_diagram(builder, io, options = {})
+        io.puts render(builder, options)
+      end
+
+      def render(builder, options = {})
         case options[:format]
-        when :json
-          io.puts diagram_hash_with_metadata(diagram, builder).to_json
-        when :yaml
-          require 'yaml'
-          io.puts diagram_hash_with_metadata(diagram, builder).to_yaml
-        when :machine_schema
-          # Output MachineSchema format compatible with state-machines-rs CLI
-          schema = SchemaBuilder.new(builder.machine, options)
-          io.puts schema.to_json
-        else
-          # Default text representation
-          io.puts diagram_to_text(diagram, options, builder)
+        when nil, :text then diagram_to_text(builder)
+        when :json then Document.to_json(builder)
+        when :yaml then Document.to_yaml(builder)
+        when :machine_schema then machine_schema_json(builder, options)
+        else raise ArgumentError, "unknown format #{options[:format].inspect}; known: #{FORMATS.compact.join(', ')}"
         end
       end
 
-      def draw_state(state, _graph, options = {}, io = $stdout)
-        machine = state.machine
+      # The schema describes a whole machine, not a part of one
+      def machine_schema_json(builder, options)
+        raise ArgumentError, "format: :machine_schema describes a whole machine, not #{builder.scope}" if builder.scope
 
-        touching = each_transition_pair(machine).select { |from, to, _event, _branch| [from, to].include?(state.name) }
-        states_involved = Set.new([state.name]).merge(touching.flat_map { |from, to, _event, _branch| [from, to] })
-
-        builder = build_filtered_builder(machine, states_involved, options)
-        touching.each { |from, to, event, branch| builder.send(:add_transition, from, to, event, branch) }
-
-        output_diagram(builder.diagram, io, options.merge(state_filter: state.name.to_s), builder)
+        SchemaBuilder.new(builder.machine, options).to_json
       end
 
-      # Every (source, target, event, branch) the machine draws
-      def each_transition_pair(machine)
-        machine.events.flat_map do |event|
-          event.branches.flat_map do |branch|
-            Builder.transition_pairs(machine, branch).map { |from, to| [from, to, event, branch] }
-          end
-        end
-      end
-
-      def diagram_hash_with_metadata(diagram, builder)
-        base_hash = diagram.to_h
-        return base_hash unless builder
-
-        transition_hashes = extract_transition_hashes(base_hash)
-        return base_hash unless transition_hashes
-
-        transitions_with_metadata(diagram, builder).each_with_index do |(transition, metadata), index|
-          transition_hash = transition_hashes[index]
-          next unless transition_hash
-
-          guard_terms = guard_terms_for(transition, metadata)
-          action_list = action_list_for(transition, metadata)
-
-          guard_payload = {}
-          guard_payload[:if] = guard_terms[:if] unless guard_terms[:if].empty?
-          guard_payload[:unless] = guard_terms[:unless] unless guard_terms[:unless].empty?
-          transition_hash[:guard] = guard_payload unless guard_payload.empty?
-
-          transition_hash[:action] = action_list unless action_list.empty?
-        end
-
-        base_hash
-      end
-
-      def extract_transition_hashes(base_hash)
-        data = base_hash[:data] || base_hash['data']
-        return unless data
-
-        data[:transitions] || data['transitions']
-      end
-
-      def draw_event(event, _graph, options = {}, io = $stdout)
-        machine = event.machine
-
-        states_involved = Set.new(event.branches.flat_map do |branch|
-          Builder.transition_pairs(machine, branch).flatten
-        end)
-
-        builder = build_filtered_builder(machine, states_involved, options)
-
-        # Add transitions for this event
-        builder.send(:add_event_transitions, event)
-
-        output_diagram(builder.diagram, io, options.merge(event_filter: event.name.to_s), builder)
-      end
-
-      def draw_branch(branch, _graph, event, _valid_states, io = $stdout)
-        machine = event.machine
-
-        states_involved = Set.new(Builder.transition_pairs(machine, branch).flatten)
-
-        builder = build_filtered_builder(machine, states_involved)
-
-        # Add transitions
-        builder.send(:add_branch_transitions, branch, event)
-
-        output_diagram(builder.diagram, io, {}, builder)
-      end
-
-      # Creates a fresh builder whose diagram only contains the given states
-      def build_filtered_builder(machine, states_involved, options = {})
-        builder = Builder.new(machine, options)
-        builder.instance_variable_set(:@diagram, builder.send(:create_diagram))
-
-        machine.states.select { |s| states_involved.include?(s.name) }.each do |state|
-          builder.send(:add_state_node, state)
-        end
-
-        builder
-      end
-
-      def diagram_to_text(diagram, options = {}, builder = nil)
-        # Defensive copy of options to prevent mutation affecting other tests
-        safe_options = options.dup.freeze
+      def diagram_to_text(builder)
+        diagram = builder.diagram
         output = []
-
-        # Add filter headers if specified
-        if safe_options[:state_filter]
-          output << "State: #{safe_options[:state_filter]}"
-          output << ''
-        elsif safe_options[:event_filter]
-          output << "Event: #{safe_options[:event_filter]}"
-          output << ''
-        end
-
-        output << "=== #{diagram.title} ==="
-        output << ''
+        output.push(builder.scope, '') if builder.scope
+        output.push("=== #{diagram.title} ===", '', 'States:')
 
         # Names and labels come from the builder's metadata: the diagram
         # holds escaped ids and no blank text
-        state_metadata = builder&.state_metadata || {}
-        state_name = ->(id) { state_metadata.key?(id) ? Builder.state_text(state_metadata[id][:name]) : id }
-
-        # List states
-        output << 'States:'
         diagram.states.each do |state|
-          metadata = state_metadata[state.id] || {}
+          metadata = builder.state_metadata.fetch(state.id)
           markers = +''
           markers << ' [*]' if metadata[:initial]
           markers << ' (O)' if metadata[:final]
-          label = metadata.fetch(:label) { state.label || state.id }
-          output << "  - #{label}#{markers}"
+          output << "  - #{metadata[:label]}#{markers}"
         end
 
-        output << ''
-        output << 'Transitions:'
-
-        transitions_with_metadata(diagram, builder).each do |transition, metadata|
-          condition_str = format_guard_condition(transition, metadata)
-          action_str = format_action_callback(transition, metadata)
-
-          label = metadata.fetch(:label) { transition.label || '' }
-          output << "  - #{state_name[transition.source_state_id]} -> #{state_name[transition.target_state_id]} " \
-                    "[#{label}]#{condition_str}#{action_str}"
-        end
-
+        output.push('', 'Transitions:')
+        builder.transition_metadata.each { output << "  - #{transition_text(it)}" }
         output.join("\n")
       end
 
-      # Each transition with its builder metadata: the builder records one
-      # entry per transition it adds, in order
-      def transitions_with_metadata(diagram, builder)
-        metadata = builder ? builder.transition_metadata : []
-        diagram.transitions.each_with_index.map { |transition, index| [transition, metadata[index] || {}] }
+      def transition_text(metadata)
+        from = Labels.state_text(metadata[:from])
+        to = Labels.state_text(metadata[:to])
+        "#{from} -> #{to} [#{metadata[:label]}]#{guard_text(metadata[:conditions])}#{action_text(metadata[:callbacks])}"
       end
 
-      def format_guard_condition(transition, metadata = {})
-        guard_terms = guard_terms_for(transition, metadata)
+      # Each condition in parentheses under its kind; all must hold
+      def guard_text(conditions)
+        parts = conditions.flat_map do |kind, value|
+          next value.map { "(#{kind}: #{it})" } if %i[if unless].include?(kind)
 
-        return '' if guard_terms[:if].empty? && guard_terms[:unless].empty?
-
-        parts = []
-        guard_terms[:if].each { |condition| parts << "(if: #{condition})" }
-        guard_terms[:unless].each { |condition| parts << "(unless: #{condition})" }
-        " #{parts.join(' ')}"
-      end
-
-      def guard_terms_for(transition, metadata = {})
-        guard_terms = { if: [], unless: [] }
-
-        if transition.respond_to?(:guard) && transition.guard
-          parse_guard_string(transition.guard.to_s, guard_terms)
+          requirements = value.map { |machine_name, state| "#{machine_name}=#{Labels.state_text(state)}" }
+          ["(#{kind}: #{requirements.join(', ')})"]
         end
-
-        conditions = metadata.fetch(:conditions, {})
-        %i[if unless].each do |kind|
-          Array(conditions[kind]).compact.each do |condition|
-            Array(condition).each { |item| guard_terms[kind] << normalize_condition_name(item) }
-          end
-        end
-
-        guard_terms[:if].uniq!
-        guard_terms[:unless].uniq!
-
-        guard_terms
+        parts.empty? ? '' : " #{parts.join(' ')}"
       end
 
-      def parse_guard_string(guard_string, guard_terms)
-        guard_string.split(/\s*&&\s*/).each do |segment|
-          next if segment.nil? || segment.empty?
-
-          if segment.start_with?('!')
-            guard_terms[:unless] << normalize_condition_name(segment[1..])
-          else
-            guard_terms[:if] << normalize_condition_name(segment)
-          end
-        end
-      end
-
-      def normalize_condition_name(condition)
-        return '' if condition.nil?
-
-        condition_name = condition.to_s.strip
-        condition_name = condition_name[1..] if condition_name.start_with?(':')
-        condition_name
-      end
-
-      def format_action_callback(transition, metadata = {})
-        actions = action_list_for(transition, metadata)
-        return '' if actions.empty?
-
-        " (action: #{actions.join(', ')})"
-      end
-
-      def action_list_for(transition, metadata = {})
-        actions = []
-
-        if transition.respond_to?(:action) && transition.action
-          actions << normalize_action_name(transition.action)
-        end
-
-        callbacks = metadata.fetch(:callbacks, {})
-        callbacks.values.each do |callback_list|
-          Array(callback_list).each do |callback|
-            actions << normalize_action_name(callback)
-          end
-        end
-
-        actions.compact!
-        actions.uniq!
-        actions
-      end
-
-      def normalize_action_name(action)
-        return if action.nil?
-
-        action.is_a?(Symbol) ? action.to_s : action.to_s
+      def action_text(callbacks)
+        actions = callbacks.values.flatten
+        actions.empty? ? '' : " (action: #{actions.join(', ')})"
       end
     end
   end
