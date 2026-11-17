@@ -439,6 +439,82 @@ class BuilderTest < StateMachines::TestCase
     end
   end
 
+  def core_and_builder(&)
+    klass = Class.new do
+      attr_accessor :state
+
+      def foo = nil
+      def ok? = true
+      class_eval(&)
+    end
+    [klass, -> { StateMachines::Diagram::Builder.new(klass.state_machines[:state]).tap(&:build) }]
+  end
+
+  # What the core does with go, and what the builder draws: neither checks a
+  # condition the core never evaluates
+  def assert_unevaluated_condition_is_left_alone(&)
+    klass, build = core_and_builder(&)
+    object = klass.new
+    object.go
+
+    assert_equal 'b', object.state
+    assert_equal([%w[a b]], build.call.diagram.transitions.map { [it.source_state_id, it.target_state_id] })
+  end
+
+  def test_a_callback_of_another_event_is_not_checked
+    assert_unevaluated_condition_is_left_alone do
+      state_machine :state, initial: :a do
+        before_transition on: :other, if: "system('x')", do: :foo
+        event(:go) { transition a: :b }
+      end
+    end
+  end
+
+  def test_a_branch_an_unguarded_one_shadows_is_not_checked
+    assert_unevaluated_condition_is_left_alone do
+      state_machine :state, initial: :a do
+        event(:go) do
+          transition a: :b
+          transition a: :c, if: "system('x')"
+        end
+      end
+    end
+  end
+
+  def test_an_if_after_one_that_always_fails_is_not_checked
+    assert_unevaluated_condition_is_left_alone do
+      state_machine :state, initial: :a do
+        event(:go) do
+          transition a: :c, if: ['false', "system('x')"]
+          transition a: :b
+        end
+      end
+    end
+  end
+
+  def test_unless_is_checked_even_when_if_already_failed_as_in_the_core
+    klass, build = core_and_builder do
+      state_machine :state, initial: :a do
+        event(:go) { transition a: :b, if: 'false', unless: "system('x')" }
+      end
+    end
+
+    assert_raises(SecurityError) { klass.new.go }
+    assert_raises(SecurityError) { build.call }
+  end
+
+  def test_a_callback_condition_is_checked_once_its_transition_matches
+    klass, build = core_and_builder do
+      state_machine :state, initial: :a do
+        before_transition on: :go, if: "system('x')", do: :foo
+        event(:go) { transition a: :b }
+      end
+    end
+
+    assert_raises(SecurityError) { klass.new.go }
+    assert_raises(SecurityError) { build.call }
+  end
+
   def test_unless_and_callback_code_get_the_core_check_too
     assert_raises(SecurityError) do
       built { state_machine(:state, initial: :idle) { event(:go) { transition idle: :a, unless: 'false # `x`' } } }

@@ -349,6 +349,20 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert_equal({ name: 'go', transitions: [{ sources: %w[idle], target: 'b' }] }, schema[:events].first)
   end
 
+  def test_conditions_the_core_never_evaluates_are_not_checked
+    schema = schema_of do
+      state_machine :state, initial: :a do
+        before_transition on: :other, if: "system('x')", do: :foo
+        event(:go) do
+          transition a: :b
+          transition a: :c, if: "system('x')"
+        end
+      end
+    end
+
+    assert_equal({ name: 'go', transitions: [{ sources: %w[a], target: 'b' }] }, schema[:events].first)
+  end
+
   def test_a_conditional_callback_is_refused
     error = assert_raises(ArgumentError) do
       schema_of do
