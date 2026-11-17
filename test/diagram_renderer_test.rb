@@ -431,7 +431,7 @@ class DiagramRendererTest < StateMachines::TestCase
     event = machine.events[:open]
     io = StringIO.new
 
-    diagram = event.branches.first.draw(nil, event, [], io)
+    diagram = with_renderer(StateMachines::Diagram::Renderer) { event.branches.first.draw(nil, event, [], io) }
 
     assert_kind_of Diagrams::StateDiagram, diagram
     assert io.string.start_with?("Event: open, branch 1\n")
@@ -465,5 +465,22 @@ class DiagramRendererTest < StateMachines::TestCase
     StateMachines::Diagram::Renderer.draw_machine(klass.state_machine(:state), io: io)
 
     assert_includes io.string, '  - alone [*] (O)'
+  end
+
+  def test_requiring_the_gem_leaves_the_global_renderer_alone
+    code = "require 'state_machines'; before = StateMachines::Machine.renderer; " \
+           "require 'state_machines-diagram'; exit StateMachines::Machine.renderer.equal?(before)"
+
+    assert system(RbConfig.ruby, '-Ilib', '-e', code), 'requiring state_machines-diagram changed Machine.renderer'
+  end
+
+  private
+
+  def with_renderer(renderer)
+    previous = StateMachines::Machine.instance_variable_get(:@renderer)
+    StateMachines::Machine.renderer = renderer
+    yield
+  ensure
+    StateMachines::Machine.renderer = previous
   end
 end

@@ -5,5 +5,9 @@ require 'state_machines/diagram/version'
 require 'state_machines/diagram/builder'
 require 'state_machines/diagram/renderer'
 
-# Set the renderer to use diagram
-StateMachines::Machine.renderer = StateMachines::Diagram::Renderer
+# Loading the gem changes no global state. Machine#draw (and State, Event
+# and Branch#draw) use this renderer once it is chosen:
+#
+#   StateMachines::Machine.renderer = StateMachines::Diagram::Renderer
+#
+# or draw with it directly: StateMachines::Diagram::Renderer.draw_machine(machine)

@@ -17,7 +17,17 @@ draws Mermaid from the same builder.
 gem 'state_machines-diagram'
 ```
 
-Requiring the gem makes its renderer the one `Machine#draw` uses.
+Requiring the gem changes no global state. Choose its renderer for
+`Machine#draw` (and `State`, `Event` and `Branch#draw`), as the core intends:
+
+```ruby
+require 'state_machines-diagram'
+
+StateMachines::Machine.renderer = StateMachines::Diagram::Renderer
+```
+
+or draw with it directly, whatever renderer machines use:
+`StateMachines::Diagram::Renderer.draw_machine(machine, io: $stdout)`.
 
 ## Quick Start
 
@@ -69,7 +79,9 @@ no `unless:` to, as the core requires of an Array condition. State guards
 (`if_state:`, `unless_any_state:`, ...) are shown under their kind, with their
 requirements together: `(if_any_state: gate=open, alarm=on)`. As in the core,
 `nil`, `false` and `[]` are no condition, and a condition the core cannot
-evaluate (`if: true`) raises `ArgumentError`. `action:` lists the callbacks the
+evaluate (`if: true`) raises `ArgumentError`. A String is code the core
+evaluates: one with no expression (`if: ''`) always yields nil, so its branch
+is never taken and not drawn, while `unless: ''` is no condition. `action:` lists the callbacks the
 core runs on that transition, before, around, then after; a callback with its own
 conditions shows them: `audit (if enabled?)`.
 
