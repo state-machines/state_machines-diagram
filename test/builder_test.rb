@@ -328,6 +328,42 @@ class BuilderTest < StateMachines::TestCase
     end
   end
 
+  def test_string_conditions_the_core_always_reads_the_same_are_resolved
+    builder = built do
+      define_method(:always_runs) { nil }
+      define_method(:never_runs) { raise 'the core never runs this callback' }
+
+      state_machine :state, initial: :idle do
+        before_transition if: '', do: :never_runs
+        after_transition unless: '   ', do: :always_runs
+
+        event(:go) do
+          transition idle: :a, if: ''
+          transition idle: :b, if: ['true', :ok?]
+          transition idle: :c, if: 'false'
+          transition idle: :d, unless: '# nothing'
+        end
+      end
+    end
+    drawn = builder.transition_metadata.map do |data|
+      [data[:to], data[:conditions], data[:callbacks][:before], data[:callbacks][:after]]
+    end
+
+    assert_equal [['b', { if: ['ok?'], unless: [] }, [], ['always_runs']],
+                  ['d', { if: [], unless: [] }, [], ['always_runs']]], drawn
+
+    object = builder.machine.owner_class.new
+    object.go
+
+    assert_equal 'b', object.state, 'the core skips the if: "" branch and runs no never_runs'
+  end
+
+  def test_code_that_does_not_parse_is_refused_as_in_the_core
+    assert_raises(ArgumentError) do
+      built { state_machine(:state, initial: :idle) { event(:go) { transition idle: :a, if: '1 +' } } }
+    end
+  end
+
   def test_a_callback_shows_the_conditions_it_runs_under
     builder = built do
       state_machine :state, initial: :idle do

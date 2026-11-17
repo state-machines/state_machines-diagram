@@ -334,6 +334,20 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert_equal({ name: 'go', transitions: [{ sources: %w[idle], target: 'a' }] }, schema[:events].first)
   end
 
+  def test_a_branch_whose_code_condition_never_passes_is_neither_taken_nor_a_fallback
+    schema = schema_of do
+      state_machine :state, initial: :idle do
+        event(:go) do
+          transition idle: :a, if: ''
+          transition idle: :b, unless: ''
+          transition idle: :c
+        end
+      end
+    end
+
+    assert_equal({ name: 'go', transitions: [{ sources: %w[idle], target: 'b' }] }, schema[:events].first)
+  end
+
   def test_a_conditional_callback_is_refused
     error = assert_raises(ArgumentError) do
       schema_of do

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'prism'
 require_relative 'labels'
 
 module StateMachines
@@ -35,10 +36,11 @@ module StateMachines
 
       # The (source, target, branch) transitions an event performs, in order.
       # The core takes the first branch whose source and guards match, so a
-      # source an unguarded branch takes never reaches a later branch.
+      # source an unguarded branch takes never reaches a later branch, and a
+      # branch whose conditions never pass (#never?) performs nothing.
       def event_transitions(machine, event)
         settled = []
-        event.branches.flat_map do |branch|
+        event.branches.reject { never?(it) }.flat_map do |branch|
           pairs = transition_pairs(machine, branch).reject { settled.include?(it.first) }
           settled |= pairs.map(&:first) unless guarded?(branch)
           pairs.map { |from, to| [from, to, branch] }
@@ -57,12 +59,50 @@ module StateMachines
 
       # A branch's guards: the if: and unless: tokens, then each state guard
       # under its kind with its requirements, in the core's order.
+      # A condition that always passes is no condition, so it is left out
+      # (a String the core always evaluates the same way, see #constant).
       def guard_conditions(branch)
         {
-          if: Labels.condition_tokens(branch.if_condition),
-          unless: Labels.condition_tokens(branch.unless_condition),
+          if: Labels.condition_tokens(conditions_of(branch.if_condition).reject { constant(it) == true }),
+          unless: Labels.condition_tokens(conditions_of(branch.unless_condition).reject { constant(it) == false }),
           **branch.state_guards.transform_values(&:to_h)
         }
+      end
+
+      # Whether the core never passes the branch's conditions: an if: that
+      # always fails or an unless: that always holds, such as `if: ''`
+      def never?(branch)
+        conditions_of(branch.if_condition).any? { constant(it) == false } ||
+          conditions_of(branch.unless_condition).any? { constant(it) == true }
+      end
+
+      # The conditions of an if:/unless: as the core reads them: nil, false
+      # and [] are none, an Array is several
+      def conditions_of(condition)
+        return [] unless condition
+
+        condition.is_a?(Array) ? condition : [condition]
+      end
+
+      # The value a condition always has, or nil when it depends on the
+      # object. The core evaluates a String as code: code without an
+      # expression ('', '   ', a comment) yields nil, a lone nil, false or
+      # true literal its value. Code that does not parse raises
+      # ArgumentError, as the core does when it evaluates it.
+      def constant(condition)
+        return unless condition.is_a?(String)
+
+        result = Prism.parse(condition)
+        raise ArgumentError, "#{condition.inspect} is not valid Ruby, which the core evaluates it as" if result.failure?
+
+        body = result.value.statements.body
+        return false if body.empty?
+        return unless body.one?
+
+        case body.first
+        when Prism::NilNode, Prism::FalseNode then false
+        when Prism::TrueNode then true
+        end
       end
 
       # The callbacks the core runs on +event_name+ from +from+ to +to+, by
@@ -73,7 +113,7 @@ module StateMachines
         query = { from: from, to: to, on: event_name, guard: false }
         CALLBACK_TYPES.to_h do |type|
           matching = machine.callbacks[type == :after ? :after : :before].select do |callback|
-            callback.type == type && callback.branch.matches?(nil, query)
+            callback.type == type && !never?(callback.branch) && callback.branch.matches?(nil, query)
           end
           [type, matching.flat_map do |callback|
             conditions = guard_conditions(callback.branch)
