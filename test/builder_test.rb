@@ -230,9 +230,10 @@ class BuilderTest < StateMachines::TestCase
 
     open, close = builder.transition_metadata.map { it[:callbacks] }
 
-    assert_equal({ before: %w[warm_up log_open audit], around: %w[wrap], after: %w[announce] }, open)
-    assert_equal({ before: %w[audit], around: [], after: [] }, close)
-    assert_equal 'warm_up, log_open, audit, wrap, announce', diagram.transitions.first.action
+    assert_equal({ before: ['warm_up', 'log_open', 'audit (if audited?)'], around: %w[wrap], after: %w[announce] },
+                 open)
+    assert_equal({ before: ['audit (if audited?)'], around: [], after: [] }, close)
+    assert_equal 'warm_up, log_open, audit (if audited?), wrap, announce', diagram.transitions.first.action
   end
 
   def test_callbacks_follow_the_source_of_each_pair_of_a_branch
@@ -292,6 +293,52 @@ class BuilderTest < StateMachines::TestCase
   def test_draws_only_what_the_core_performs_from_each_source
     assert_equal performed_pairs(Shadowed), drawn_pairs(Shadowed)
     assert_equal [%w[a b], %w[b c], %w[c d]], drawn_pairs(Shadowed)
+  end
+
+  def built(&)
+    klass = Class.new do
+      attr_accessor :state
+
+      def ok? = true
+      class_eval(&)
+    end
+    StateMachines::Diagram::Builder.new(klass.state_machines[:state]).tap(&:build)
+  end
+
+  def test_nil_false_and_empty_conditions_are_no_condition_as_in_the_core
+    builder = built do
+      state_machine :state, initial: :idle do
+        event(:go) do
+          transition idle: :a, if: false, unless: nil
+          transition idle: :b, if: []
+        end
+      end
+    end
+
+    drawn = builder.diagram.transitions.map { [it.source_state_id, it.target_state_id, it.guard] }
+
+    assert_equal [['idle', 'a', nil]], drawn
+  end
+
+  def test_a_condition_the_core_cannot_evaluate_is_refused
+    [true, [:ok?, 1]].each do |condition|
+      assert_raises(ArgumentError) do
+        built { state_machine(:state, initial: :idle) { event(:go) { transition idle: :a, if: condition } } }
+      end
+    end
+  end
+
+  def test_a_callback_shows_the_conditions_it_runs_under
+    builder = built do
+      state_machine :state, initial: :idle do
+        before_transition on: :go, if: :enabled?, unless: %i[muted], do: :audit
+        after_transition on: :go, if: false, do: :log
+        event(:go) { transition idle: :a }
+      end
+    end
+
+    assert_equal({ before: ['audit (if enabled? && unless muted)'], around: [], after: ['log'] },
+                 builder.transition_metadata.first[:callbacks])
   end
 
   def test_an_anonymous_owner_leaves_no_blank_in_the_title

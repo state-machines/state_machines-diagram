@@ -24,13 +24,42 @@ module StateMachines
         pairs.one? ? "#{kind} #{pairs.first}" : "#{kind} (#{pairs.join(', ')})"
       end
 
-      # The tokens of an if:/unless: condition. The core takes an Array as
-      # several conditions (all must pass for if:, none for unless:), so
-      # each is its own token.
-      def condition_tokens(condition)
-        return [] if condition.nil?
+      # What the core can evaluate as a condition
+      CALLABLE = [Symbol, String, Proc, Method].freeze
 
-        (condition.is_a?(Array) ? condition : [condition]).map { action_label(it) }
+      # The tokens of an if:/unless: condition, as the core reads it: nil,
+      # false and [] are no condition, an Array is several (all must pass
+      # for if:, none for unless:), each its own token. Anything else the
+      # core raises ArgumentError on when it evaluates it, so it is refused
+      # here rather than drawn as a condition.
+      def condition_tokens(condition)
+        return [] unless condition
+
+        (condition.is_a?(Array) ? condition : [condition]).map do |item|
+          unless CALLABLE.any? { item.is_a?(it) }
+            raise ArgumentError, "#{item.inspect} is not a condition the core can evaluate " \
+                                 '(a Symbol, String, Proc or Method)'
+          end
+
+          action_label(item)
+        end
+      end
+
+      # A branch's guards (Introspection.guard_conditions) as phrases: "if a",
+      # "unless b", each one term, then each state guard group
+      def condition_phrases(conditions)
+        conditions.flat_map do |kind, value|
+          next value.map { "#{kind} #{condition_term(it)}" } if %i[if unless].include?(kind)
+
+          [state_guard_token(kind, value)]
+        end
+      end
+
+      # A callback (Introspection.callbacks) as text: its label, and the
+      # conditions it runs under, "audit (if enabled?)"
+      def callback_text(callback)
+        phrases = condition_phrases(callback[:conditions])
+        phrases.empty? ? callback[:label] : "#{callback[:label]} (#{phrases.join(' && ')})"
       end
 
       # A token as one term of a guard expression: code that is more than

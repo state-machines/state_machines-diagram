@@ -46,7 +46,7 @@ module StateMachines
       end
 
       def guarded?(branch)
-        guard_conditions(branch).values.any? { !it.empty? }
+        conditional?(guard_conditions(branch))
       end
 
       def to_state_for(requirement, from, state_names)
@@ -66,17 +66,30 @@ module StateMachines
       end
 
       # The callbacks the core runs on +event_name+ from +from+ to +to+, by
-      # kind, as labels. The core files around callbacks with the before
-      # ones. Callback conditions depend on the object, so a conditional
-      # callback is listed as one that may run.
-      def callback_labels(machine, from, to, event_name)
+      # kind, each method as { label:, conditions: } with the callback's own
+      # guards (Introspection.guard_conditions form; all empty when it always
+      # runs). The core files around callbacks with the before ones.
+      def callbacks(machine, from, to, event_name)
         query = { from: from, to: to, on: event_name, guard: false }
         CALLBACK_TYPES.to_h do |type|
-          callbacks = machine.callbacks[type == :after ? :after : :before].select do |callback|
+          matching = machine.callbacks[type == :after ? :after : :before].select do |callback|
             callback.type == type && callback.branch.matches?(nil, query)
           end
-          [type, callbacks.flat_map { it.instance_variable_get(:@methods) }.map { Labels.action_label(it) }]
+          [type, matching.flat_map do |callback|
+            conditions = guard_conditions(callback.branch)
+            callback.instance_variable_get(:@methods).map { { label: Labels.action_label(it), conditions: conditions } }
+          end]
         end
+      end
+
+      # #callbacks as text, by kind: "audit", or "audit (if enabled?)" for a
+      # callback that runs only under its conditions
+      def callback_labels(machine, from, to, event_name)
+        callbacks(machine, from, to, event_name).transform_values { |list| list.map { Labels.callback_text(it) } }
+      end
+
+      def conditional?(conditions)
+        conditions.values.any? { !it.empty? }
       end
     end
   end
