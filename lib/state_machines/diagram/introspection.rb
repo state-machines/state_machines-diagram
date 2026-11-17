@@ -10,6 +10,10 @@ module StateMachines
     module Introspection
       # Callback kinds in the order they run around a transition
       CALLBACK_TYPES = %i[before around after].freeze
+      # The core checks a String condition with EvalHelpers#validate_eval_string,
+      # which is private: it is called on an object extended with EvalHelpers
+      # alone, not on any machine part, until the core exposes it.
+      CORE_EVAL = Object.new.extend(EvalHelpers)
 
       module_function
 
@@ -87,14 +91,15 @@ module StateMachines
       # The value a condition always has, or nil when it depends on the
       # object. The core evaluates a String as code: code without an
       # expression ('', '   ', a comment) yields nil, a lone nil, false or
-      # true literal its value. Code that does not parse raises
-      # ArgumentError, as the core does when it evaluates it.
+      # true literal its value. Before evaluating, the core checks the whole
+      # String, comments included, with its own validator, raising
+      # SecurityError for patterns it refuses and ArgumentError for bad
+      # syntax; so does this, whatever the String would yield.
       def constant(condition)
         return unless condition.is_a?(String)
 
+        validate_eval_string(condition)
         result = Prism.parse(condition)
-        raise ArgumentError, "#{condition.inspect} is not valid Ruby, which the core evaluates it as" if result.failure?
-
         body = result.value.statements.body
         return false if body.empty?
         return unless body.one?
@@ -126,6 +131,11 @@ module StateMachines
       # callback that runs only under its conditions
       def callback_labels(machine, from, to, event_name)
         callbacks(machine, from, to, event_name).transform_values { |list| list.map { Labels.callback_text(it) } }
+      end
+
+      # The core's own check of a String condition (see CORE_EVAL)
+      def validate_eval_string(code)
+        CORE_EVAL.send(:validate_eval_string, code)
       end
 
       def conditional?(conditions)

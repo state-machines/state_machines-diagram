@@ -365,6 +365,40 @@ class BuilderTest < StateMachines::TestCase
     assert_equal 'b', object.state
   end
 
+  def test_code_the_core_refuses_is_refused_whatever_it_would_yield
+    ['true # system(1)', 'false # require "x"', ''].each do |code|
+      klass = Class.new do
+        attr_accessor :state
+
+        state_machine(:state, initial: :idle) do
+          event(:go) do
+            transition idle: :a, if: code
+            transition idle: :b
+          end
+        end
+      end
+      next assert_equal('b', klass.new.tap(&:go).state) if code.empty?
+
+      assert_raises(SecurityError) { klass.new.go }
+      assert_raises(SecurityError) { StateMachines::Diagram::Builder.new(klass.state_machines[:state]).build }
+      assert_raises(SecurityError) { StateMachines::Diagram::SchemaBuilder.new(klass.state_machines[:state]).build }
+    end
+  end
+
+  def test_unless_and_callback_code_get_the_core_check_too
+    assert_raises(SecurityError) do
+      built { state_machine(:state, initial: :idle) { event(:go) { transition idle: :a, unless: 'false # `x`' } } }
+    end
+    assert_raises(SecurityError) do
+      built do
+        state_machine :state, initial: :idle do
+          before_transition if: '# File.read', do: :log
+          event(:go) { transition idle: :a }
+        end
+      end
+    end
+  end
+
   def test_code_that_does_not_parse_is_refused_as_in_the_core
     assert_raises(ArgumentError) do
       built { state_machine(:state, initial: :idle) { event(:go) { transition idle: :a, if: '1 +' } } }

@@ -81,7 +81,10 @@ requirements together: `(if_any_state: gate=open, alarm=on)`. As in the core,
 `nil`, `false` and `[]` are no condition, and a condition the core cannot
 evaluate (`if: true`) raises `ArgumentError`. A String is code the core
 evaluates: one with no expression (`if: ''`) always yields nil, so its branch
-is never taken and not drawn, while `unless: ''` is no condition. `action:` lists the callbacks the
+is never taken and not drawn, while `unless: ''` is no condition. Every String
+first goes through the core's own check, as at evaluation: code it refuses
+anywhere in the String, comments included (`"true # system(1)"`), raises its
+`SecurityError`, bad syntax its `ArgumentError`. `action:` lists the callbacks the
 core runs on that transition, before, around, then after; a callback with its own
 conditions shows them: `audit (if enabled?)`.
 
