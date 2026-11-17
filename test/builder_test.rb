@@ -265,7 +265,8 @@ class BuilderTest < StateMachines::TestCase
     object = Nested.new
     object.go
     machine = Nested.state_machines[:state]
-    sequence = StateMachines::Diagram::Introspection.callback_sequence(machine, :idle, :done, :go)
+    sequence = StateMachines::Diagram::Introspection.callback_sequence(machine, :idle, :done, :go,
+                                                                       branch: machine.events[:go].branches.first)
 
     assert_equal ['before1', 'around1 enter', 'before2', 'around2 enter', 'around2 exit', 'around1 exit', 'after1'],
                  object.log

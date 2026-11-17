@@ -92,26 +92,36 @@ module StateMachines
       # if: ones gave: none may hold, so it stops at one that always holds
       def unless_conditions(branch) = Conditions.evaluated(branch.unless_condition, true)
 
-      # The callbacks the core runs on +event_name+ from +from+ to +to+, in
-      # the order it runs them, each method as { kind:, phase:, label:,
+      # The callbacks the core runs on +event_name+ from +from+ to +to+ when
+      # +branch+ (the event branch selected, nil for none) performs it, in the
+      # order it runs them, each method as { kind:, phase:, label:,
       # conditions: } (conditions in #guard_conditions form; all empty when
-      # it always runs). The core keeps before and around callbacks in one
-      # list in declaration order: a before runs where it was declared, an
-      # around enters there (phase: :enter) and wraps everything after it.
-      # Then the state changes, the arounds exit innermost first
-      # (phase: :exit), and the after callbacks run in declaration order.
-      # phase is nil for before and after. Callback conditions depend on the
-      # object, so a conditional callback is one that may run.
-      def callback_sequence(machine, from, to, event_name)
+      # it always runs). The core keeps the machine's before and around
+      # callbacks in one list in declaration order, then the branch's own
+      # (transition ..., before:/around:) in the order written: a before
+      # runs where it stands, an around enters there (phase: :enter) and
+      # wraps everything after it, so the branch's wrap closest to the state
+      # change. Then the state changes, the arounds exit innermost first
+      # (phase: :exit), and the after callbacks run: the branch's, then the
+      # machine's, each in declaration order. phase is nil for before and
+      # after. Callback conditions depend on the object, so a conditional
+      # callback is one that may run; a branch callback runs whenever its
+      # branch is selected, so it has no conditions of its own. This is the
+      # order of a run that fires the event; a preview (an event attribute
+      # validated before its save) runs every before first and the arounds
+      # around the action only.
+      def callback_sequence(machine, from, to, event_name, branch:)
         query = { from: from, to: to, on: event_name, guard: false }
         # The core matches the event and states before it evaluates a
         # callback's conditions
         live = ->(callback) { callback.branch.matches?(nil, query) && !never?(callback.branch) }
-        befores = machine.callbacks[:before].select(&live).flat_map do |callback|
+        own = branch ? branch.callbacks : []
+        befores = (machine.callbacks[:before].select(&live) + own.reject { it.type == :after }).flat_map do |callback|
           callback_steps(callback, callback.type, callback.type == :around ? :enter : nil)
         end
         exits = befores.select { it[:phase] == :enter }.reverse.map { it.merge(phase: :exit) }
-        afters = machine.callbacks[:after].select(&live).flat_map { callback_steps(it, :after, nil) }
+        afters = (own.select { it.type == :after } + machine.callbacks[:after].select(&live))
+                 .flat_map { callback_steps(it, :after, nil) }
         befores + exits + afters
       end
 
@@ -124,8 +134,8 @@ module StateMachines
 
       # #callback_sequence by kind, each in declaration order, as
       # { label:, conditions: }; an around is listed once
-      def callbacks(machine, from, to, event_name)
-        callbacks_by_kind(callback_sequence(machine, from, to, event_name))
+      def callbacks(machine, from, to, event_name, branch:)
+        callbacks_by_kind(callback_sequence(machine, from, to, event_name, branch: branch))
       end
 
       # A #callback_sequence by kind, as #callbacks gives it
@@ -138,8 +148,8 @@ module StateMachines
 
       # #callbacks as text, by kind: "audit", or "audit (if enabled?)" for a
       # callback that runs only under its conditions
-      def callback_labels(machine, from, to, event_name)
-        labels_by_kind(callbacks(machine, from, to, event_name))
+      def callback_labels(machine, from, to, event_name, branch:)
+        labels_by_kind(callbacks(machine, from, to, event_name, branch: branch))
       end
 
       def labels_by_kind(callbacks)

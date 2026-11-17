@@ -113,7 +113,7 @@ module StateMachines
 
       def add_transition(from, to, event, branch)
         conditions = guard_conditions(branch)
-        sequence = callback_sequence(machine, from, to, event.name)
+        sequence = callback_sequence(machine, from, to, event.name, branch: branch)
         label = label_of(event, event.name.to_s)
 
         transition = diagram.add_transition(

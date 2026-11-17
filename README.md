@@ -85,12 +85,17 @@ is never taken and not drawn, while `unless: ''` is no condition. Every String
 first goes through the core's own check, as at evaluation: code it refuses
 anywhere in the String, comments included (`"true # system(1)"`), raises its
 `SecurityError`, bad syntax its `ArgumentError`. `action:` lists the callbacks the
-core runs on that transition in the order it runs them: before and around
-callbacks in declaration order (an around where it enters; it wraps what follows
-and exits, innermost first, once the state has changed), then the after callbacks.
-A callback with its own conditions shows them: `audit (if enabled?)`.
-`StateMachines::Diagram::Introspection.callback_sequence(machine, from, to, event)`
-gives that order step by step, around exits included.
+core runs on that transition in the order it runs them: the machine's before and
+around callbacks in declaration order, then those the transition itself declares
+(`transition parked: :idling, before: :check, around: :wrap, after: :log`) in the
+order written (an around where it enters; it wraps what follows and exits,
+innermost first, once the state has changed), then the transition's after
+callbacks and the machine's. A callback with its own conditions shows them:
+`audit (if enabled?)`; a transition's own callbacks run whenever it is taken, so
+its guards are theirs.
+`StateMachines::Diagram::Introspection.callback_sequence(machine, from, to, event, branch:)`
+gives that order step by step for the branch that performs the transition, around
+exits included.
 
 `draw` takes `io:` (default `$stdout`), `format:` and `human_names: true`, which
 labels states and events by their human names.
@@ -148,7 +153,8 @@ callbacks, in diagram order:
 `:machine_schema` describes the whole machine for the state-machines-rs CLI
 (`state-machines validate` accepts it). Each transition carries its branch's
 conditions (`guards`, `unless`) and the callbacks the core runs on it
-(`before`, `around`, `after`). The core takes an event's first branch whose
+(`before`, `around`, `after`), the transition's own (`transition ..., after:`)
+among the machine's where the core runs them. The core takes an event's first branch whose
 source and guards match, so an event with several candidates from one source is
 `branching: true`, its unguarded candidate the `fallback`; a source an unguarded
 branch takes never reaches a later one, which is left out. States are named by
@@ -162,8 +168,8 @@ order than the core cannot be described and raise `ArgumentError`. Code generate
 from the schema runs every around's Before stage, the guards, before callbacks,
 after callbacks, then every around's AfterSuccess stage; the core checks guards
 first, enters an around where it was declared and exits it before the after
-callbacks. So an around fits the schema only when declared before the before
-callbacks, alone, without after callbacks, and on an unguarded transition or one
+callbacks. So an around, the machine's or the transition's, fits the schema
+only when it comes before every before callback, alone, without after callbacks, and on an unguarded transition or one
 whose source has other candidates (guards then select first in both).
 
 ```ruby

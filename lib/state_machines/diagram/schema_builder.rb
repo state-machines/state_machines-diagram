@@ -105,7 +105,8 @@ module StateMachines
 
       # A branch's guards all must hold: its if: conditions and state guards
       # go in guards, its unless: conditions in unless. The callbacks are
-      # those the core runs on that transition.
+      # those the core runs on that transition, the branch's own included:
+      # they run exactly when this candidate is taken.
       def branch_transitions(event, branch, performed)
         conditions = Introspection.guard_conditions(branch)
         guards = conditions[:if] + conditions.except(:if, :unless).map do |kind, value|
@@ -113,8 +114,8 @@ module StateMachines
         end
 
         pairs = performed.map do |from, to, _branch|
-          [from, to, callback_names(from, to, event, guarded: Introspection.guarded?(branch),
-                                                     selected: @candidate_counts[from] > 1)]
+          [from, to, callback_names(from, to, event, branch, guarded: Introspection.guarded?(branch),
+                                                             selected: @candidate_counts[from] > 1)]
         end
         pairs.group_by { |_from, to, callbacks| [to, callbacks] }.map do |(target, callbacks), group|
           {
@@ -132,9 +133,13 @@ module StateMachines
       # unconditional name would claim the callback always runs, a marker in
       # the name would name no function, so a conditional callback is refused.
       # Its separate arrays also fix an order (see CallbackOrder); when the
-      # core runs the callbacks in another order, they are refused too.
-      def callback_names(from, to, event, guarded:, selected:)
-        sequence = Introspection.callback_sequence(machine, from, to, event.name)
+      # core runs the callbacks in another order, they are refused too. The
+      # arrays do not say which callbacks are the branch's: they need not,
+      # as a candidate is one branch, so its arrays hold what that branch
+      # runs, and the order check covers where the branch's callbacks fall
+      # among the machine's.
+      def callback_names(from, to, event, branch, guarded:, selected:)
+        sequence = Introspection.callback_sequence(machine, from, to, event.name, branch: branch)
         sequence.each do |step|
           next unless Introspection.conditional?(step[:conditions])
 

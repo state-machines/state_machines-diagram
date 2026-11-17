@@ -15,6 +15,7 @@ require_relative 'models/troll'
 require_relative 'models/regiment'
 require_relative 'models/commander'
 require_relative 'models/battle'
+require_relative 'models/phoenix'
 
 # Set deterministic seed for reproducible test runs - can be overridden with --seed
 ENV['TESTOPTS'] ||= '--seed=12345'

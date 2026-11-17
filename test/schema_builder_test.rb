@@ -436,18 +436,78 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert_match(/the core runs guards, around enter wrap, around exit wrap; /, error.message)
   end
 
+  def test_branch_callbacks_join_the_machine_ones_in_the_core_order
+    schema = schema_of do
+      state_machine :state, initial: :idle do
+        before_transition :prepare
+        after_transition :log
+        event :go do
+          transition idle: :a, if: :ready?, before: :aim, after: %i[land settle]
+          transition idle: :b, after: :drift
+        end
+      end
+    end
+
+    assert_equal [{ sources: %w[idle], target: 'a', guards: %w[ready?], before: %w[prepare aim],
+                    after: %w[land settle log] },
+                  { sources: %w[idle], target: 'b', before: %w[prepare], after: %w[drift log], fallback: true }],
+                 schema[:events].first[:transitions]
+  end
+
+  BRANCH_ORDERS_THE_SCHEMA_CANNOT_RUN = {
+    'branch around with a branch after' => proc { event(:go) { transition idle: :a, around: :wrap, after: :log } },
+    'branch around with a machine after' => proc do
+      after_transition :log
+      event(:go) { transition idle: :a, around: :wrap }
+    end,
+    'branch around after a machine before' => proc do
+      before_transition :prepare
+      event(:go) { transition idle: :a, around: :wrap }
+    end,
+    'branch before written before its around' => proc do
+      event(:go) { transition idle: :a, before: :aim, around: :wrap }
+    end
+  }.freeze
+
+  def test_a_branch_around_whose_order_the_schema_cannot_run_is_refused
+    BRANCH_ORDERS_THE_SCHEMA_CANNOT_RUN.each do |name, machine|
+      error = assert_raises(ArgumentError, name) do
+        schema_of { state_machine(:state, initial: :idle) { instance_eval(&machine) } }
+      end
+      assert_match(/cannot express the callback order of go from idle/, error.message)
+    end
+  end
+
+  def test_a_branch_around_the_schema_runs_in_the_core_order_is_kept
+    schema = schema_of do
+      state_machine :state, initial: :idle do
+        event(:go) { transition idle: :a, around: :wrap, before: :aim }
+      end
+    end
+
+    # the schema enters every around before any before, as the core does here
+    assert_equal [{ sources: %w[idle], target: 'a', before: %w[aim], around: %w[wrap] }],
+                 schema[:events].first[:transitions]
+  end
+
+  def test_branch_callbacks_with_a_conditional_machine_callback_are_refused
+    error = assert_raises(ArgumentError) { StateMachines::Diagram::SchemaBuilder.new(Phoenix.state_machines[:flame]).build }
+
+    assert_match(/cannot express the conditional callback chant \(if ritual\?\)/, error.message)
+  end
+
   def test_an_event_without_transitions_is_left_out
     refute relay_events.key?('never')
   end
 
   # What state-machines-rs MachineSchema#validate requires of an event's candidates
   def test_every_fixture_schema_keeps_the_rs_branching_rules
-    owners = [Dragon, Mage, Troll, Regiment, Battle, Character, Commander, Relay]
+    owners = [Dragon, Mage, Troll, Regiment, Battle, Character, Commander, Phoenix, Relay]
     machines = owners.flat_map { it.state_machines.values }
     machines.each do |machine|
       StateMachines::Diagram::SchemaBuilder.new(machine).build[:events].each { assert_rs_candidates(it) }
     rescue ArgumentError => e
-      assert_match(/cannot express the callback order/, e.message)
+      assert_match(/cannot express the (callback order|conditional callback)/, e.message)
     end
   end
 
