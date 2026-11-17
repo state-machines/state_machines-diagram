@@ -281,8 +281,8 @@ class DiagramRendererTest < StateMachines::TestCase
     )
 
     output = io.string
-    assert_includes output, 'nil_state'
-    assert_includes output, 'nil_state -> active [activate]'
+    assert_includes output, '  - nil [*]'
+    assert_includes output, 'nil -> active [activate]'
   end
 
   def test_guards_and_conditions_metadata

@@ -27,6 +27,12 @@ module StateMachines
         "%#{value.unpack1('H*')}"
       end
 
+      # A state name as text, as the core shows it (State#description): the
+      # nil state reads "nil"
+      def self.state_text(name)
+        name.nil? ? 'nil' : name.to_s
+      end
+
       # One state guard as text, its requirements kept together under the
       # guard's own kind: "if_any_state (gate=open, alarm=on)"
       def self.state_guard_token(kind, requirements)
@@ -121,7 +127,7 @@ module StateMachines
         diagram.add_state(id: id, label: diagram_text(label))
 
         @state_metadata[id] = {
-          name: state_name(state),
+          name: state.name&.to_s,
           label: label,
           initial: state.initial?,
           final: state.final?,
@@ -129,16 +135,13 @@ module StateMachines
         }
       end
 
-      def state_name(state)
-        state.name ? state.name.to_s : NIL_STATE_ID
-      end
-
+      # A human name callback may return nil: the state then shows its name
       def state_label(state)
-        if options[:human_names]
-          state.human_name(machine.owner_class)
-        else
-          state_name(state)
-        end
+        name = self.class.state_text(state.name)
+        return name unless options[:human_names]
+
+        human_name = state.human_name(machine.owner_class)
+        human_name.nil? ? name : human_name.to_s
       end
 
       def build_state_metadata(state)
@@ -192,12 +195,14 @@ module StateMachines
         @transition_metadata << transition_data
       end
 
+      # A human name callback may return nil: the transition then shows the
+      # event's name, which still says which event fires
       def transition_label(event)
-        if options[:human_names]
-          event.human_name(machine.owner_class)
-        else
-          event.name.to_s
-        end
+        name = event.name.to_s
+        return name unless options[:human_names]
+
+        human_name = event.human_name(machine.owner_class)
+        human_name.nil? ? name : human_name.to_s
       end
 
       def build_callbacks(branch, event)

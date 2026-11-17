@@ -99,7 +99,38 @@ class BuilderTest < StateMachines::TestCase
     assert_equal ids.uniq, ids
     assert_equal ['idle', 'nil_state', '%6e696c5f7374617465', '%2a', '%20', '%253261', 'a[b'].sort, ids.sort
     names = ids.map { |id| builder.state_metadata.fetch(id)[:name] }
-    assert_equal ['idle', 'nil_state', 'nil_state', '*', ' ', '%2a', 'a[b'].sort, names.sort
+    assert_equal ['idle', nil, 'nil_state', '*', ' ', '%2a', 'a[b'].sort_by(&:to_s), names.sort_by(&:to_s)
+  end
+
+  def test_the_nil_state_reads_as_the_core_shows_it
+    builder = StateMachines::Diagram::Builder.new(Oddity.state_machines[:state])
+    builder.build
+
+    assert_nil builder.state_metadata.fetch('nil_state')[:name]
+    assert_equal 'nil', builder.state_metadata.fetch('nil_state')[:label]
+    assert_equal 'nil_state', builder.state_metadata.fetch('%6e696c5f7374617465')[:label]
+  end
+
+  class Nameless
+    attr_accessor :state
+
+    state_machine :state, initial: :idle do
+      state :idle, human_name: ->(*) {}
+
+      event :go, human_name: ->(*) {} do
+        transition idle: :done
+      end
+    end
+  end
+
+  def test_a_nil_human_name_falls_back_to_the_name
+    builder = StateMachines::Diagram::Builder.new(Nameless.state_machines[:state], human_names: true)
+    diagram = builder.build
+
+    assert_equal 'idle', builder.state_metadata.fetch('idle')[:label]
+    assert_equal 'idle', diagram.states.first.label
+    assert_equal ['go'], builder.transition_metadata.map { it[:label] }
+    assert_equal ['go'], diagram.transitions.map(&:label)
   end
 
   def test_an_empty_state_name_is_escaped

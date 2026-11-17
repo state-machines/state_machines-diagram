@@ -155,7 +155,7 @@ module StateMachines
         # Names and labels come from the builder's metadata: the diagram
         # holds escaped ids and no blank text
         state_metadata = builder&.state_metadata || {}
-        state_name = ->(id) { state_metadata.dig(id, :name) || id }
+        state_name = ->(id) { state_metadata.key?(id) ? Builder.state_text(state_metadata[id][:name]) : id }
 
         # List states
         output << 'States:'
