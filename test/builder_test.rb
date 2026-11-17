@@ -328,34 +328,41 @@ class BuilderTest < StateMachines::TestCase
     end
   end
 
-  def test_string_conditions_the_core_always_reads_the_same_are_resolved
-    builder = built do
-      define_method(:always_runs) { nil }
-      define_method(:never_runs) { raise 'the core never runs this callback' }
+  class Constants
+    attr_accessor :state
 
-      state_machine :state, initial: :idle do
-        before_transition if: '', do: :never_runs
-        after_transition unless: '   ', do: :always_runs
+    def ok? = true
+    def always_runs = nil
+    def never_runs = raise('the core never runs this callback')
 
-        event(:go) do
-          transition idle: :a, if: ''
-          transition idle: :b, if: ['true', :ok?]
-          transition idle: :c, if: 'false'
-          transition idle: :d, unless: '# nothing'
-        end
+    state_machine :state, initial: :idle do
+      before_transition if: '', do: :never_runs
+      after_transition unless: '   ', do: :always_runs
+
+      event(:go) do
+        transition idle: :a, if: ''
+        transition idle: :b, if: ['true', :ok?]
+        transition idle: :c, if: 'false'
+        transition idle: :d, unless: '# nothing'
       end
     end
-    drawn = builder.transition_metadata.map do |data|
+  end
+
+  def test_string_conditions_the_core_always_reads_the_same_are_resolved
+    drawn = StateMachines::Diagram::Builder.new(Constants.state_machines[:state]).tap(&:build)
+                                           .transition_metadata.map do |data|
       [data[:to], data[:conditions], data[:callbacks][:before], data[:callbacks][:after]]
     end
 
     assert_equal [['b', { if: ['ok?'], unless: [] }, [], ['always_runs']],
                   ['d', { if: [], unless: [] }, [], ['always_runs']]], drawn
+  end
 
-    object = builder.machine.owner_class.new
+  def test_the_core_skips_a_branch_whose_code_condition_never_passes
+    object = Constants.new
     object.go
 
-    assert_equal 'b', object.state, 'the core skips the if: "" branch and runs no never_runs'
+    assert_equal 'b', object.state
   end
 
   def test_code_that_does_not_parse_is_refused_as_in_the_core
