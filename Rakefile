@@ -23,6 +23,11 @@ else
 end
 # rubocop:enable Rake/DuplicateTask
 
+desc 'Read every fixture schema back through state-machines-rs (needs cargo; STATE_MACHINES_RS=checkout)'
+task :rust_schema_check do
+  ruby 'script/rust_schema_check/check.rb'
+end
+
 require 'rubocop/rake_task'
 
 RuboCop::RakeTask.new

@@ -2,7 +2,7 @@
 
 require 'json'
 require_relative 'builder'
-require_relative 'callback_order'
+require_relative 'callback_plan'
 
 module StateMachines
   module Diagram
@@ -19,12 +19,13 @@ module StateMachines
       end
 
       # name, initial, states and events are required, even when empty;
-      # final_states is optional
+      # final_states and the machine-wide callbacks are optional
       def build
         events = build_events
         finals = final_state_names(events)
         { name: machine_name, initial: initial_state, states: state_names, events: events }
           .then { finals.empty? ? it : it.merge(final_states: finals) }
+          .then { @machine_callbacks.empty? ? it : it.merge(callbacks: @machine_callbacks) }
       end
 
       def to_json(*)
@@ -66,6 +67,8 @@ module StateMachines
       # An event without transitions can never fire, and MachineSchema refuses
       # one, so it is left out.
       def build_events
+        @plan = CallbackPlan.new(machine, performed_by_event)
+        @machine_callbacks = @plan.machine_callbacks
         machine.events.filter_map do |event|
           transitions = candidates(event)
           next if transitions.empty?
@@ -75,13 +78,19 @@ module StateMachines
         end
       end
 
+      # Each event's (source, target, branch) transitions; an event without
+      # any is left out
+      def performed_by_event
+        @performed = machine.events.to_h { [it, Introspection.event_transitions(machine, it)] }
+        @performed.reject { |_event, performed| performed.empty? }
+      end
+
       # The core tries an event's branches in order and takes the first whose
       # source and guards match (Introspection.event_transitions leaves out
       # what an earlier unguarded branch takes): one candidate per branch,
       # target and callbacks, with the sources that reach it.
       def candidates(event)
-        performed = Introspection.event_transitions(machine, event)
-        @candidate_counts = performed.map(&:first).tally
+        performed = @performed.fetch(event)
         performed.chunk_while { |one, other| one.last.equal?(other.last) }
                  .flat_map { |group| branch_transitions(event, group.first.last, group) }
       end
@@ -105,51 +114,24 @@ module StateMachines
 
       # A branch's guards all must hold: its if: conditions and state guards
       # go in guards, its unless: conditions in unless. The callbacks are
-      # those the core runs on that transition, the branch's own included:
-      # they run exactly when this candidate is taken.
+      # those the core runs on that transition that the machine-wide ones
+      # do not cover, in its run order (see CallbackPlan).
       def branch_transitions(event, branch, performed)
         conditions = Introspection.guard_conditions(branch)
         guards = conditions[:if] + conditions.except(:if, :unless).map do |kind, value|
           Labels.state_guard_token(kind, value)
         end
 
-        pairs = performed.map do |from, to, _branch|
-          [from, to, callback_names(from, to, event, branch, guarded: Introspection.guarded?(branch),
-                                                             selected: @candidate_counts[from] > 1)]
-        end
+        pairs = performed.map { |from, to, _branch| [from, to, @plan.transition_callbacks(event, from, to, branch)] }
         pairs.group_by { |_from, to, callbacks| [to, callbacks] }.map do |(target, callbacks), group|
           {
             sources: group.map { |from, _to, _callbacks| schema_id(from) },
             target: schema_id(target),
             guards: guards,
             unless: conditions[:unless],
-            **callbacks
+            callbacks: callbacks
           }.reject { |_key, value| value.empty? }
         end
-      end
-
-      # MachineSchema callbacks are names of functions that run whenever the
-      # transition does; it has no place for a callback's own conditions. An
-      # unconditional name would claim the callback always runs, a marker in
-      # the name would name no function, so a conditional callback is refused.
-      # Its separate arrays also fix an order (see CallbackOrder); when the
-      # core runs the callbacks in another order, they are refused too. The
-      # arrays do not say which callbacks are the branch's: they need not,
-      # as a candidate is one branch, so its arrays hold what that branch
-      # runs, and the order check covers where the branch's callbacks fall
-      # among the machine's.
-      def callback_names(from, to, event, branch, guarded:, selected:)
-        sequence = Introspection.callback_sequence(machine, from, to, event.name, branch: branch)
-        sequence.each do |step|
-          next unless Introspection.conditional?(step[:conditions])
-
-          raise ArgumentError, 'MachineSchema cannot express the conditional callback ' \
-                               "#{Labels.callback_text(step)} on #{event.name}"
-        end
-        names = Introspection.callbacks_by_kind(sequence).transform_values { |list| list.map { it[:label] } }
-        CallbackOrder.check(sequence, names, guarded: guarded, selected: selected,
-                                             transition: "#{event.name} from #{Labels.state_text(from)}")
-        names
       end
     end
   end

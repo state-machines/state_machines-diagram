@@ -150,36 +150,43 @@ callbacks, in diagram order:
  "callbacks": {"before": [], "around": [], "after": ["send_notification"]}}
 ```
 
-`:machine_schema` describes the whole machine for the state-machines-rs CLI
-(`state-machines validate` accepts it). Each transition carries its branch's
-conditions (`guards`, `unless`) and the callbacks the core runs on it
-(`before`, `around`, `after`), the transition's own (`transition ..., after:`)
-among the machine's where the core runs them. The core takes an event's first branch whose
-source and guards match, so an event with several candidates from one source is
-`branching: true`, its unguarded candidate the `fallback`; a source an unguarded
-branch takes never reaches a later one, which is left out. States are named by
-their diagram id, so the nil state (`nil_state`) and a state named `:nil` stay
-two states. `final_states` lists the states the core calls final that no
-transition leaves: the core also calls a state with only loopbacks final, but a
-loopback still fires, and MachineSchema allows no transition out of a final
-state. A dynamic initial state, a callback with its own conditions (the
-schema's callbacks always run), or callbacks the schema would run in another
-order than the core cannot be described and raise `ArgumentError`. Code generated
-from the schema runs every around's Before stage, the guards, before callbacks,
-after callbacks, then every around's AfterSuccess stage; the core checks guards
-first, enters an around where it was declared and exits it before the after
-callbacks. So an around, the machine's or the transition's, fits the schema
-only when it comes before every before callback, alone, without after callbacks, and on an unguarded transition or one
-whose source has other candidates (guards then select first in both).
+`:machine_schema` describes the whole machine in the state-machines-rs 0.35 schema
+(state-machines-core 0.15 `MachineSchema`; `state-machines validate` accepts it). Each
+transition carries its branch's conditions (`guards`, `unless`). The callbacks the core
+runs on it are an ordered `callbacks` list of `{kind, name}` (`before`, `around`,
+`after`), as generated code runs them: guards first, then the befores and arounds in one
+list, an around wrapping what follows it, the state change, the arounds exiting
+innermost first, then the afters, which is the core's order. The machine's callbacks go
+in the top-level `callbacks` with `from` / `to` / `on` filters when their requirements
+map onto those filters and generated code, which runs the machine-wide ones before a
+transition's own, still runs every transition's callbacks in the core's order;
+otherwise each transition lists all of its callbacks itself. So a transition's own
+`after:` (which the core runs before the machine's afters) keeps the machine's afters on
+each transition, and a loopback requirement (`any => same`) has no filter.
+
+The core takes an event's first branch whose source and guards match, so an event with
+several candidates from one source is `branching: true`, its unguarded candidate the
+`fallback`; a source an unguarded branch takes never reaches a later one, which is left
+out. States are named by their diagram id, so the nil state (`nil_state`) and a state
+named `:nil` stay two states. `final_states` lists the states the core calls final that
+no transition leaves: the core also calls a state with only loopbacks final, but a
+loopback still fires, and MachineSchema allows no transition out of a final state. A
+dynamic initial state or a callback with its own conditions the core may run (schema
+callbacks have none) cannot be described and raise `ArgumentError`.
+
+`bundle exec rake rust_schema_check` (cargo and a state-machines-rs checkout, set by
+`STATE_MACHINES_RS`, default `../state-machines-rs`) reads every fixture's schema back
+through state-machines-core: its validation, and `MachineSchema::transition_callbacks`
+for each transition against the order the core runs.
 
 ```ruby
 StateMachines::Diagram::Renderer.machine_schema(Order.state_machine(:status))
 # => {name: "Order#status", initial: "pending", states: ["pending", "processing", "shipped", "cancelled"],
 #     events: [{name: "process", transitions: [{sources: ["pending"], target: "processing", guards: ["payment_cleared?"]}]},
-#              {name: "ship", transitions: [{sources: ["processing"], target: "shipped", unless: ["on_hold?", "address_missing?"],
-#                                            after: ["send_notification"]}]},
+#              {name: "ship", transitions: [{sources: ["processing"], target: "shipped", unless: ["on_hold?", "address_missing?"]}]},
 #              {name: "cancel", transitions: [{sources: ["pending", "processing"], target: "cancelled"}]}],
-#     final_states: ["shipped", "cancelled"]}
+#     final_states: ["shipped", "cancelled"],
+#     callbacks: [{kind: "after", name: "send_notification", to: ["shipped"]}]}
 ```
 
 Any other format raises `ArgumentError`, as does `:machine_schema` for part of a machine.

@@ -95,7 +95,7 @@ module StateMachines
       # The callbacks the core runs on +event_name+ from +from+ to +to+ when
       # +branch+ (the event branch selected, nil for none) performs it, in the
       # order it runs them, each method as { kind:, phase:, label:,
-      # conditions: } (conditions in #guard_conditions form; all empty when
+      # conditions:, callback: } (conditions in #guard_conditions form; all empty when
       # it always runs). The core keeps the machine's before and around
       # callbacks in one list in declaration order, then the branch's own
       # (transition ..., before:/around:) in the order written: a before
@@ -125,10 +125,12 @@ module StateMachines
         befores + exits + afters
       end
 
+      # Each step also names the StateMachines::Callback it comes from
+      # (callback:), the machine's or the branch's
       def callback_steps(callback, kind, phase)
         conditions = guard_conditions(callback.branch)
         callback.callables.map do |method|
-          { kind: kind, phase: phase, label: Labels.action_label(method), conditions: conditions }
+          { kind: kind, phase: phase, label: Labels.action_label(method), conditions: conditions, callback: callback }
         end
       end
 

@@ -4,9 +4,6 @@ require 'test_helper'
 require 'json'
 
 class SchemaBuilderTest < StateMachines::TestCase
-  # Dragon#mood and Troll#regeneration declare around callbacks whose order
-  # MachineSchema cannot express (see the callback order tests); these use
-  # Regiment's machines, which it can
   def setup
     @formation = Regiment.state_machine(:formation)
     @supply = Regiment.state_machine(:supply_state)
@@ -260,10 +257,11 @@ class SchemaBuilderTest < StateMachines::TestCase
 
   def test_branches_from_one_source_are_ordered_branching_with_a_fallback
     assert_equal({ name: 'go', branching: true, transitions: [
-                   { sources: ['a'], target: 'b', guards: ['p'], before: ['from_a'], after: ['after_go'] },
-                   { sources: ['a'], target: 'c', before: ['from_a'], after: ['after_go'], fallback: true },
-                   { sources: ['b'], target: 'c', after: ['after_go'], fallback: true }
+                   { sources: ['a'], target: 'b', guards: ['p'] },
+                   { sources: %w[a b], target: 'c', fallback: true }
                  ] }, relay_events['go'])
+    assert_equal [callback(:before, :from_a, from: %w[a]), callback(:after, :after_go, on: %w[go])],
+                 StateMachines::Diagram::SchemaBuilder.new(Relay.state_machines[:state]).build[:callbacks]
   end
 
   def test_a_source_an_unguarded_branch_takes_reaches_no_later_branch
@@ -375,119 +373,94 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert_equal 'MachineSchema cannot express the conditional callback audit (if enabled?) on go', error.message
   end
 
-  def order_schema(guard: nil, &callbacks)
-    schema_of do
+  def callback(kind, name, **filters) = { kind: kind.to_s, name: name.to_s, **filters }
+
+  def test_machine_callbacks_go_machine_wide_with_their_filters
+    schema = schema_of do
       state_machine :state, initial: :idle do
-        instance_eval(&callbacks)
-        event(:go) do
-          transition idle: :a, **(guard ? { if: guard } : {})
-          transition idle: :b if guard
-        end
+        state :b
+        before_transition from: :idle, do: :prepare
+        around_transition on: :go, do: :wrap
+        after_transition except_to: :a, do: %i[log tidy]
+        event(:go) { transition idle: :a }
+        event(:back) { transition a: :idle }
       end
     end
+
+    assert_equal [callback(:before, :prepare, from: %w[idle]), callback(:around, :wrap, on: %w[go]),
+                  callback(:after, :log, to: %w[idle b]), callback(:after, :tidy, to: %w[idle b])],
+                 schema[:callbacks]
+    assert(schema[:events].all? { |event| event[:transitions].none? { it.key?(:callbacks) } })
   end
 
-  def test_an_around_the_schema_runs_in_the_core_order_is_kept
-    schema = order_schema do
-      around_transition :wrap
-      before_transition :prepare
-    end
-
-    assert_equal [{ sources: %w[idle], target: 'a', before: %w[prepare], around: %w[wrap] }],
-                 schema[:events].first[:transitions]
-  end
-
-  def test_a_guarded_candidate_selected_first_keeps_its_around
-    schema = order_schema(guard: :ready?) { around_transition :wrap }
-
-    # ready? is checked to select a candidate before any around, in both
-    assert_equal([%w[wrap], %w[wrap]], schema[:events].first[:transitions].map { it[:around] })
-  end
-
-  def test_callbacks_the_schema_would_run_in_another_order_are_refused
-    {
-      'before declared before the around' => proc do
+  # Generated code checks guards first, then runs befores and arounds in one
+  # declaration-ordered list, as the core does
+  def test_every_order_of_befores_arounds_and_afters_is_kept
+    schema = schema_of do
+      state_machine :state, initial: :idle do
         before_transition :prepare
-        around_transition :wrap
-      end,
-      'after callbacks with an around' => proc do
-        around_transition :wrap
-        after_transition :log
-      end,
-      'two arounds' => proc do
         around_transition :outer
+        after_transition :log
         around_transition :inner
-      end
-    }.each do |name, callbacks|
-      error = assert_raises(ArgumentError, name) { order_schema(&callbacks) }
-      assert_match(/cannot express the callback order of go from idle/, error.message)
-    end
-  end
-
-  def test_an_around_before_a_guard_of_a_single_candidate_is_refused
-    error = assert_raises(ArgumentError) do
-      schema_of do
-        state_machine :state, initial: :idle do
-          around_transition :wrap
-          event(:go) { transition idle: :a, if: :ready? }
-        end
+        before_transition :aim
+        event(:go) { transition idle: :a, if: :ready? }
       end
     end
-    assert_match(/the core runs guards, around enter wrap, around exit wrap; /, error.message)
+
+    assert_equal [callback(:before, :prepare), callback(:around, :outer), callback(:around, :inner),
+                  callback(:before, :aim), callback(:after, :log)], schema[:callbacks]
   end
 
-  def test_branch_callbacks_join_the_machine_ones_in_the_core_order
+  def test_branch_callbacks_are_listed_on_their_transition_in_run_order
     schema = schema_of do
       state_machine :state, initial: :idle do
         before_transition :prepare
         after_transition :log
         event :go do
-          transition idle: :a, if: :ready?, before: :aim, after: %i[land settle]
+          transition idle: :a, if: :ready?, before: :aim, around: :wrap, after: %i[land settle]
           transition idle: :b, after: :drift
         end
       end
     end
 
-    assert_equal [{ sources: %w[idle], target: 'a', guards: %w[ready?], before: %w[prepare aim],
-                    after: %w[land settle log] },
-                  { sources: %w[idle], target: 'b', before: %w[prepare], after: %w[drift log], fallback: true }],
-                 schema[:events].first[:transitions]
+    # The core runs a branch's afters before the machine's; machine-wide
+    # afters would run first, so the machine's after stays on each transition
+    assert_equal [callback(:before, :prepare)], schema[:callbacks]
+    assert_equal([[callback(:before, :aim), callback(:around, :wrap), callback(:after, :land),
+                   callback(:after, :settle), callback(:after, :log)],
+                  [callback(:after, :drift), callback(:after, :log)]],
+                 schema[:events].first[:transitions].map { it[:callbacks] })
   end
 
-  BRANCH_ORDERS_THE_SCHEMA_CANNOT_RUN = {
-    'branch around with a branch after' => proc { event(:go) { transition idle: :a, around: :wrap, after: :log } },
-    'branch around with a machine after' => proc do
-      after_transition :log
-      event(:go) { transition idle: :a, around: :wrap }
-    end,
-    'branch around after a machine before' => proc do
-      before_transition :prepare
-      event(:go) { transition idle: :a, around: :wrap }
-    end,
-    'branch before written before its around' => proc do
-      event(:go) { transition idle: :a, before: :aim, around: :wrap }
-    end
-  }.freeze
-
-  def test_a_branch_around_whose_order_the_schema_cannot_run_is_refused
-    BRANCH_ORDERS_THE_SCHEMA_CANNOT_RUN.each do |name, machine|
-      error = assert_raises(ArgumentError, name) do
-        schema_of { state_machine(:state, initial: :idle) { instance_eval(&machine) } }
-      end
-      assert_match(/cannot express the callback order of go from idle/, error.message)
-    end
-  end
-
-  def test_a_branch_around_the_schema_runs_in_the_core_order_is_kept
+  def test_a_branch_keeps_the_order_its_callbacks_are_written_in
     schema = schema_of do
       state_machine :state, initial: :idle do
         event(:go) { transition idle: :a, around: :wrap, before: :aim }
+        event(:back) { transition a: :idle, before: :aim, around: :wrap }
       end
     end
 
-    # the schema enters every around before any before, as the core does here
-    assert_equal [{ sources: %w[idle], target: 'a', before: %w[aim], around: %w[wrap] }],
-                 schema[:events].first[:transitions]
+    assert_equal([[callback(:around, :wrap), callback(:before, :aim)],
+                  [callback(:before, :aim), callback(:around, :wrap)]],
+                 schema[:events].map { it[:transitions].first[:callbacks] })
+  end
+
+  # A loopback requirement (same) has no filter: the machine's callbacks
+  # are listed on each transition they run on, still in run order
+  def test_callbacks_without_filters_stay_on_each_transition
+    schema = schema_of do
+      state_machine :state, initial: :idle do
+        before_transition any => same, do: :stay
+        before_transition do: :prepare
+        before_transition on: :other, if: :never_read, do: :elsewhere
+        event(:go) { transition idle: :a }
+        event(:wait) { transition idle: same }
+      end
+    end
+
+    refute schema.key?(:callbacks)
+    assert_equal([[callback(:before, :prepare)], [callback(:before, :stay), callback(:before, :prepare)]],
+                 schema[:events].map { it[:transitions].first[:callbacks] })
   end
 
   def test_branch_callbacks_with_a_conditional_machine_callback_are_refused
@@ -507,7 +480,7 @@ class SchemaBuilderTest < StateMachines::TestCase
     machines.each do |machine|
       StateMachines::Diagram::SchemaBuilder.new(machine).build[:events].each { assert_rs_candidates(it) }
     rescue ArgumentError => e
-      assert_match(/cannot express the (callback order|conditional callback)/, e.message)
+      assert_match(/cannot express the conditional callback/, e.message)
     end
   end
 
