@@ -81,7 +81,7 @@ class BuilderTest < StateMachines::TestCase
     end
   end
 
-  # core 0.302.0 finds nil and :"" as one state; later cores keep them apart
+  # nil and :"" are two states (core 0.303.0 keeps them apart)
   class NilAndEmpty
     state_machine initial: :idle do
       state nil
@@ -145,17 +145,14 @@ class BuilderTest < StateMachines::TestCase
     assert_equal([%w[% done]], diagram.transitions.map { [it.source_state_id, it.target_state_id] })
   end
 
-  def test_each_state_the_core_has_is_drawn_once
-    machine = NilAndEmpty.state_machines[:state]
-    diagram = StateMachines::Diagram::Builder.new(machine).build
-    id = ->(name) { StateMachines::Diagram::Builder.state_id(name) }
+  def test_nil_and_an_empty_name_are_two_states
+    builder = StateMachines::Diagram::Builder.new(NilAndEmpty.state_machines[:state])
+    diagram = builder.build
 
-    assert_equal machine.states.map { id[it.name] }.sort, diagram.states.map(&:id).sort
-    # The target is whichever state the core finds under :""
-    assert_equal([['idle', id[machine.states[:""].name]]],
-                 diagram.transitions.map { [it.source_state_id, it.target_state_id] })
-    # A core that keeps nil and :"" apart has both, drawn as two
-    assert_equal %w[% idle nil_state], diagram.states.map(&:id).sort if machine.states.map(&:name).include?(:"")
+    # in the core's priority order
+    assert_equal %w[idle % nil_state], diagram.states.map(&:id)
+    assert_equal([%w[idle %]], diagram.transitions.map { [it.source_state_id, it.target_state_id] })
+    assert_equal(['idle', '', nil], diagram.states.map { builder.state_metadata.fetch(it.id)[:name] })
   end
 
   def test_blank_names_stay_in_the_metadata_not_the_diagram
@@ -296,6 +293,21 @@ class BuilderTest < StateMachines::TestCase
     builder.build
 
     assert_equal([%w[only_from_a], []], builder.transition_metadata.map { it[:callbacks][:before] })
+  end
+
+  def test_a_bound_callback_shows_where_the_user_wrote_it
+    line = __LINE__ + 5
+    klass = Class.new do
+      attr_accessor :state
+
+      state_machine :state, initial: :idle do
+        before_transition(bind_to_object: true) { nil }
+        event(:go) { transition idle: :done }
+      end
+    end
+    builder = StateMachines::Diagram::Builder.new(klass.state_machines[:state]).tap(&:build)
+
+    assert_equal ["lambda@builder_test.rb:#{line}"], builder.transition_metadata.first[:callbacks][:before]
   end
 
   def test_a_symbol_to_proc_callback_shows_its_symbol

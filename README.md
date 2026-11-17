@@ -290,7 +290,7 @@ bundle exec rubocop
 ## Requirements
 
 - Ruby 4.0+
-- state_machines 0.300+
+- state_machines 0.303.0+
 - diagram 0.4+
 
 ## License

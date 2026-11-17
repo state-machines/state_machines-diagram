@@ -10,18 +10,12 @@ module StateMachines
     module Introspection
       # Callback kinds in the order they run around a transition
       CALLBACK_TYPES = %i[before around after].freeze
-      # The core checks a String condition with EvalHelpers#validate_eval_string,
-      # which is private: it is called on an object extended with EvalHelpers
-      # alone, not on any machine part, until the core exposes it.
-      CORE_EVAL = Object.new.extend(EvalHelpers)
 
       module_function
 
-      # The machine's states by priority, each once: the core looks names up
-      # by their String form, so nil and :"" find the same state and
-      # StateCollection#by_priority can list it twice
+      # The machine's states by priority
       def states_of(machine)
-        machine.states.by_priority.uniq
+        machine.states.by_priority
       end
 
       # The (source, target) pairs a branch performs. From one source the
@@ -98,7 +92,7 @@ module StateMachines
       def constant(condition)
         return unless condition.is_a?(String)
 
-        validate_eval_string(condition)
+        EvalHelpers.validate_eval_string(condition)
         result = Prism.parse(condition)
         body = result.value.statements.body
         return false if body.empty?
@@ -133,7 +127,7 @@ module StateMachines
 
       def callback_steps(callback, kind, phase)
         conditions = guard_conditions(callback.branch)
-        callback.instance_variable_get(:@methods).map do |method|
+        callback.callables.map do |method|
           { kind: kind, phase: phase, label: Labels.action_label(method), conditions: conditions }
         end
       end
@@ -160,11 +154,6 @@ module StateMachines
 
       def labels_by_kind(callbacks)
         callbacks.transform_values { |list| list.map { Labels.callback_text(it) } }
-      end
-
-      # The core's own check of a String condition (see CORE_EVAL)
-      def validate_eval_string(code)
-        CORE_EVAL.send(:validate_eval_string, code)
       end
 
       def conditional?(conditions)

@@ -12,4 +12,4 @@ end
 
 gem 'diagram', '>= 0.4'
 gem 'minitest', '~> 6.0'
-gem 'state_machines', '>= 0.300'
+gem 'state_machines', '>= 0.303.0'
