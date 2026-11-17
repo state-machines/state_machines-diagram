@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/state-machines/state_machines-diagram/compare/state_machines-diagram/v0.3.0...state_machines-diagram/v0.4.0) (2026-11-17)
+
+
+### Features
+
+* show a transition's own callbacks where the core runs them ([25328a6](https://github.com/state-machines/state_machines-diagram/commit/25328a6cc0e194aee10b21a346b21e5cb16bc198))
+* write MachineSchema callbacks as state-machines-rs 0.35 reads them ([d961a94](https://github.com/state-machines/state_machines-diagram/commit/d961a944d4887ab89c46ead5348891567cc51e42))
+
+
+### Bug Fixes
+
+* make rust_schema_check fail unless every fixture reaches Rust ([c438dd0](https://github.com/state-machines/state_machines-diagram/commit/c438dd0bcf8c2d2f0c1d250885c96c394fe8b5b2))
+* refuse after_failure callbacks MachineSchema cannot run ([1536a07](https://github.com/state-machines/state_machines-diagram/commit/1536a07aad84bb8deb9a5b241a02982c2677548b))
+
 ## [0.3.0](https://github.com/state-machines/state_machines-diagram/compare/state_machines-diagram/v0.2.1...state_machines-diagram/v0.3.0) (2026-11-17)
 
 
