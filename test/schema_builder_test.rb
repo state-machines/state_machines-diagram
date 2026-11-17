@@ -4,13 +4,16 @@ require 'test_helper'
 require 'json'
 
 class SchemaBuilderTest < StateMachines::TestCase
+  # Dragon#mood and Troll#regeneration declare around callbacks whose order
+  # MachineSchema cannot express (see the callback order tests); these use
+  # Regiment's machines, which it can
   def setup
-    @dragon = Dragon.new
-    @troll = Troll.new
+    @formation = Regiment.state_machine(:formation)
+    @supply = Regiment.state_machine(:supply_state)
   end
 
   def test_builds_valid_schema_hash
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@formation).build
 
     assert_kind_of Hash, schema
     assert schema[:name]
@@ -20,52 +23,52 @@ class SchemaBuilderTest < StateMachines::TestCase
   end
 
   def test_schema_has_correct_name
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@formation).build
 
-    assert_equal 'Dragon#mood', schema[:name]
+    assert_equal 'Regiment#formation', schema[:name]
   end
 
   def test_schema_has_correct_initial_state
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@formation).build
 
-    assert_equal 'sleeping', schema[:initial]
+    assert_equal 'column', schema[:initial]
   end
 
   def test_schema_includes_all_states
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@formation).build
 
-    assert_includes schema[:states], 'sleeping'
-    assert_includes schema[:states], 'hunting'
-    assert_includes schema[:states], 'hoarding'
-    assert_includes schema[:states], 'rampaging'
+    assert_includes schema[:states], 'column'
+    assert_includes schema[:states], 'square'
+    assert_includes schema[:states], 'circle'
+    assert_includes schema[:states], 'scattered'
   end
 
   def test_schema_includes_events
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@formation).build
 
     event_names = schema[:events].map { |e| e[:name] }
 
-    assert_includes event_names, 'wake_up'
-    assert_includes event_names, 'find_treasure'
-    assert_includes event_names, 'enrage'
-    assert_includes event_names, 'exhaust'
+    assert_includes event_names, 'deploy'
+    assert_includes event_names, 'form_square'
+    assert_includes event_names, 'break_formation'
+    assert_includes event_names, 'reform'
   end
 
   def test_event_has_transitions
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@formation).build
 
-    wake_up_event = schema[:events].find { |e| e[:name] == 'wake_up' }
+    form_square = schema[:events].find { |e| e[:name] == 'form_square' }
 
-    assert wake_up_event
-    assert wake_up_event[:transitions]
-    assert_predicate wake_up_event[:transitions], :any?
+    assert form_square
+    assert form_square[:transitions]
+    assert_predicate form_square[:transitions], :any?
   end
 
   def test_transition_has_sources_and_target
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@formation).build
 
-    wake_up_event = schema[:events].find { |e| e[:name] == 'wake_up' }
-    transition = wake_up_event[:transitions].first
+    form_square = schema[:events].find { |e| e[:name] == 'form_square' }
+    transition = form_square[:transitions].first
 
     assert transition[:sources]
     assert transition[:target]
@@ -73,19 +76,19 @@ class SchemaBuilderTest < StateMachines::TestCase
   end
 
   def test_transition_includes_guards
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@formation).build
 
-    wake_up_event = schema[:events].find { |e| e[:name] == 'wake_up' }
+    form_square = schema[:events].find { |e| e[:name] == 'form_square' }
     # Find transition with guard
-    transition_with_guard = wake_up_event[:transitions].find { |t| t[:guards] }
+    transition_with_guard = form_square[:transitions].find { |t| t[:guards] }
 
-    # wake_up has if: :hungry? guard
+    # form_square has if: :cavalry_threat?
     assert transition_with_guard, 'Should have at least one transition with guards'
-    assert_includes transition_with_guard[:guards], 'hungry?'
+    assert_includes transition_with_guard[:guards], 'cavalry_threat?'
   end
 
   def test_schema_serializes_to_json
-    builder = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood))
+    builder = StateMachines::Diagram::SchemaBuilder.new(@formation)
     json = builder.to_json
 
     assert json.start_with?('{')
@@ -94,11 +97,11 @@ class SchemaBuilderTest < StateMachines::TestCase
     # Should be valid JSON
     parsed = JSON.parse(json)
 
-    assert_equal 'Dragon#mood', parsed['name']
+    assert_equal 'Regiment#formation', parsed['name']
   end
 
   def test_schema_is_cli_compatible
-    schema = StateMachines::Diagram::SchemaBuilder.new(@troll.class.state_machine(:regeneration)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@supply).build
 
     # Verify structure matches MachineSchema from state-machines-rs
     assert schema.key?(:name)
@@ -127,7 +130,7 @@ class SchemaBuilderTest < StateMachines::TestCase
   def test_renderer_outputs_machine_schema_format
     io = StringIO.new
     StateMachines::Diagram::Renderer.draw_machine(
-      @dragon.class.state_machine(:flight),
+      Dragon.state_machine(:flight),
       io: io,
       format: :machine_schema
     )
@@ -143,22 +146,22 @@ class SchemaBuilderTest < StateMachines::TestCase
   end
 
   def test_renderer_machine_schema_method
-    schema = StateMachines::Diagram::Renderer.machine_schema(@troll.class.state_machine(:regeneration))
+    schema = StateMachines::Diagram::Renderer.machine_schema(@supply)
 
     assert_kind_of Hash, schema
-    assert_equal 'Troll#regeneration', schema[:name]
+    assert_equal 'Regiment#supply_state', schema[:name]
   end
 
   def test_multiple_source_states_grouped
-    schema = StateMachines::Diagram::SchemaBuilder.new(@troll.class.state_machine(:regeneration)).build
+    schema = StateMachines::Diagram::SchemaBuilder.new(@supply).build
 
-    # take_fire_damage transitions from multiple states to suppressed
-    fire_event = schema[:events].find { |e| e[:name] == 'take_fire_damage' }
+    # resupply transitions from several states to supplied
+    fire_event = schema[:events].find { |e| e[:name] == 'resupply' }
 
     assert fire_event
 
     # Should have transition(s) with multiple sources
-    suppressed_transition = fire_event[:transitions].find { |t| t[:target] == 'suppressed' }
+    suppressed_transition = fire_event[:transitions].find { |t| t[:target] == 'supplied' }
 
     assert suppressed_transition
     assert_operator suppressed_transition[:sources].length, :>, 1, 'Should group multiple source states'
@@ -229,7 +232,6 @@ class SchemaBuilderTest < StateMachines::TestCase
     state_machine :state, initial: :a do
       state :b, :c, :d
       before_transition from: :a, do: :from_a
-      around_transition to: :c, do: :wrap_c
       after_transition on: :go, do: :after_go
 
       event :go do
@@ -259,9 +261,8 @@ class SchemaBuilderTest < StateMachines::TestCase
   def test_branches_from_one_source_are_ordered_branching_with_a_fallback
     assert_equal({ name: 'go', branching: true, transitions: [
                    { sources: ['a'], target: 'b', guards: ['p'], before: ['from_a'], after: ['after_go'] },
-                   { sources: ['a'], target: 'c', before: ['from_a'], around: ['wrap_c'], after: ['after_go'],
-                     fallback: true },
-                   { sources: ['b'], target: 'c', around: ['wrap_c'], after: ['after_go'], fallback: true }
+                   { sources: ['a'], target: 'c', before: ['from_a'], after: ['after_go'], fallback: true },
+                   { sources: ['b'], target: 'c', after: ['after_go'], fallback: true }
                  ] }, relay_events['go'])
   end
 
@@ -360,6 +361,67 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert_equal 'MachineSchema cannot express the conditional callback audit (if enabled?) on go', error.message
   end
 
+  def order_schema(guard: nil, &callbacks)
+    schema_of do
+      state_machine :state, initial: :idle do
+        instance_eval(&callbacks)
+        event(:go) do
+          transition idle: :a, **(guard ? { if: guard } : {})
+          transition idle: :b if guard
+        end
+      end
+    end
+  end
+
+  def test_an_around_the_schema_runs_in_the_core_order_is_kept
+    schema = order_schema do
+      around_transition :wrap
+      before_transition :prepare
+    end
+
+    assert_equal [{ sources: %w[idle], target: 'a', before: %w[prepare], around: %w[wrap] }],
+                 schema[:events].first[:transitions]
+  end
+
+  def test_a_guarded_candidate_selected_first_keeps_its_around
+    schema = order_schema(guard: :ready?) { around_transition :wrap }
+
+    # ready? is checked to select a candidate before any around, in both
+    assert_equal([%w[wrap], %w[wrap]], schema[:events].first[:transitions].map { it[:around] })
+  end
+
+  def test_callbacks_the_schema_would_run_in_another_order_are_refused
+    {
+      'before declared before the around' => proc do
+        before_transition :prepare
+        around_transition :wrap
+      end,
+      'after callbacks with an around' => proc do
+        around_transition :wrap
+        after_transition :log
+      end,
+      'two arounds' => proc do
+        around_transition :outer
+        around_transition :inner
+      end
+    }.each do |name, callbacks|
+      error = assert_raises(ArgumentError, name) { order_schema(&callbacks) }
+      assert_match(/cannot express the callback order of go from idle/, error.message)
+    end
+  end
+
+  def test_an_around_before_a_guard_of_a_single_candidate_is_refused
+    error = assert_raises(ArgumentError) do
+      schema_of do
+        state_machine :state, initial: :idle do
+          around_transition :wrap
+          event(:go) { transition idle: :a, if: :ready? }
+        end
+      end
+    end
+    assert_match(/the core runs guards, around enter wrap, around exit wrap; /, error.message)
+  end
+
   def test_an_event_without_transitions_is_left_out
     refute relay_events.key?('never')
   end
@@ -370,6 +432,8 @@ class SchemaBuilderTest < StateMachines::TestCase
     machines = owners.flat_map { it.state_machines.values }
     machines.each do |machine|
       StateMachines::Diagram::SchemaBuilder.new(machine).build[:events].each { assert_rs_candidates(it) }
+    rescue ArgumentError => e
+      assert_match(/cannot express the callback order/, e.message)
     end
   end
 
@@ -392,12 +456,12 @@ class SchemaBuilderTest < StateMachines::TestCase
   end
 
   def test_loopback_transitions
-    schema = StateMachines::Diagram::SchemaBuilder.new(@dragon.class.state_machine(:mood)).build
+    schema = schema_of do
+      state_machine :state, initial: :hoarding do
+        event(:find_treasure) { transition hoarding: same }
+      end
+    end
 
-    # find_treasure has hoarding -> hoarding (same state)
-    find_treasure = schema[:events].find { |e| e[:name] == 'find_treasure' }
-    loopback = find_treasure[:transitions].find { |t| t[:sources].include?('hoarding') && t[:target] == 'hoarding' }
-
-    assert loopback, 'Should include loopback transition'
+    assert_equal [{ sources: ['hoarding'], target: 'hoarding' }], schema[:events].first[:transitions]
   end
 end

@@ -233,7 +233,49 @@ class BuilderTest < StateMachines::TestCase
     assert_equal({ before: ['warm_up', 'log_open', 'audit (if audited?)'], around: %w[wrap], after: %w[announce] },
                  open)
     assert_equal({ before: ['audit (if audited?)'], around: [], after: [] }, close)
-    assert_equal 'warm_up, log_open, audit (if audited?), wrap, announce', diagram.transitions.first.action
+    # wrap is declared before audit, so the core enters it first
+    assert_equal 'warm_up, log_open, wrap, audit (if audited?), announce', diagram.transitions.first.action
+  end
+
+  class Nested
+    attr_accessor :state, :log
+
+    def initialize
+      @log = []
+      super
+    end
+
+    state_machine :state, initial: :idle do
+      before_transition { |o| o.log << 'before1' }
+      around_transition do |o, _t, block|
+        o.log << 'around1 enter'
+        block.call
+        o.log << 'around1 exit'
+      end
+      before_transition { |o| o.log << 'before2' }
+      around_transition do |o, _t, block|
+        o.log << 'around2 enter'
+        block.call
+        o.log << 'around2 exit'
+      end
+      after_transition { |o| o.log << 'after1' }
+
+      event(:go) { transition idle: :done }
+    end
+  end
+
+  def test_the_callback_sequence_is_the_order_the_core_runs_them
+    object = Nested.new
+    object.go
+    machine = Nested.state_machines[:state]
+    sequence = StateMachines::Diagram::Introspection.callback_sequence(machine, :idle, :done, :go)
+
+    assert_equal ['before1', 'around1 enter', 'before2', 'around2 enter', 'around2 exit', 'around1 exit', 'after1'],
+                 object.log
+    assert_equal([[:before, nil], %i[around enter], [:before, nil], %i[around enter], %i[around exit],
+                  %i[around exit], [:after, nil]], sequence.map { [it[:kind], it[:phase]] })
+    # each around exits under the label it entered with, innermost first
+    assert_equal [sequence[3][:label], sequence[1][:label]], [sequence[4][:label], sequence[5][:label]]
   end
 
   def test_callbacks_follow_the_source_of_each_pair_of_a_branch

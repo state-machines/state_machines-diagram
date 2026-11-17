@@ -55,6 +55,12 @@ module StateMachines
         end
       end
 
+      # A callback sequence (Introspection.callback_sequence) in run order,
+      # an around where it enters: "prepare, wrap, log"
+      def action_list(sequence)
+        sequence.reject { it[:phase] == :exit }.map { callback_text(it) }.join(', ')
+      end
+
       # A callback (Introspection.callbacks) as text: its label, and the
       # conditions it runs under, "audit (if enabled?)"
       def callback_text(callback)

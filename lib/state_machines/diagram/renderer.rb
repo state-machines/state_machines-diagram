@@ -98,7 +98,8 @@ module StateMachines
       def transition_text(metadata)
         from = Labels.state_text(metadata[:from])
         to = Labels.state_text(metadata[:to])
-        "#{from} -> #{to} [#{metadata[:label]}]#{guard_text(metadata[:conditions])}#{action_text(metadata[:callbacks])}"
+        guards = guard_text(metadata[:conditions])
+        "#{from} -> #{to} [#{metadata[:label]}]#{guards}#{action_text(metadata[:callback_sequence])}"
       end
 
       # Each condition in parentheses under its kind; all must hold
@@ -112,8 +113,9 @@ module StateMachines
         parts.empty? ? '' : " #{parts.join(' ')}"
       end
 
-      def action_text(callbacks)
-        actions = callbacks.values.flatten
+      # The callbacks in run order, an around where it enters
+      def action_text(sequence)
+        actions = sequence.reject { it[:phase] == :exit }.map { it[:text] }
         actions.empty? ? '' : " (action: #{actions.join(', ')})"
       end
     end

@@ -2,6 +2,7 @@
 
 require 'json'
 require_relative 'builder'
+require_relative 'callback_order'
 
 module StateMachines
   module Diagram
@@ -79,8 +80,10 @@ module StateMachines
       # what an earlier unguarded branch takes): one candidate per branch,
       # target and callbacks, with the sources that reach it.
       def candidates(event)
-        Introspection.event_transitions(machine, event).chunk_while { |one, other| one.last.equal?(other.last) }
-                     .flat_map { |group| branch_transitions(event, group.first.last, group) }
+        performed = Introspection.event_transitions(machine, event)
+        @candidate_counts = performed.map(&:first).tally
+        performed.chunk_while { |one, other| one.last.equal?(other.last) }
+                 .flat_map { |group| branch_transitions(event, group.first.last, group) }
       end
 
       # Several candidates from one source are MachineSchema's ordered
@@ -110,7 +113,8 @@ module StateMachines
         end
 
         pairs = performed.map do |from, to, _branch|
-          [from, to, callback_names(from, to, event)]
+          [from, to, callback_names(from, to, event, guarded: Introspection.guarded?(branch),
+                                                     selected: @candidate_counts[from] > 1)]
         end
         pairs.group_by { |_from, to, callbacks| [to, callbacks] }.map do |(target, callbacks), group|
           {
@@ -127,17 +131,20 @@ module StateMachines
       # transition does; it has no place for a callback's own conditions. An
       # unconditional name would claim the callback always runs, a marker in
       # the name would name no function, so a conditional callback is refused.
-      def callback_names(from, to, event)
-        Introspection.callbacks(machine, from, to, event.name).transform_values do |list|
-          list.map do |callback|
-            if Introspection.conditional?(callback[:conditions])
-              raise ArgumentError, 'MachineSchema cannot express the conditional callback ' \
-                                   "#{Labels.callback_text(callback)} on #{event.name}"
-            end
+      # Its separate arrays also fix an order (see CallbackOrder); when the
+      # core runs the callbacks in another order, they are refused too.
+      def callback_names(from, to, event, guarded:, selected:)
+        sequence = Introspection.callback_sequence(machine, from, to, event.name)
+        sequence.each do |step|
+          next unless Introspection.conditional?(step[:conditions])
 
-            callback[:label]
-          end
+          raise ArgumentError, 'MachineSchema cannot express the conditional callback ' \
+                               "#{Labels.callback_text(step)} on #{event.name}"
         end
+        names = Introspection.callbacks_by_kind(sequence).transform_values { |list| list.map { it[:label] } }
+        CallbackOrder.check(sequence, names, guarded: guarded, selected: selected,
+                                             transition: "#{event.name} from #{Labels.state_text(from)}")
+        names
       end
     end
   end

@@ -85,8 +85,12 @@ is never taken and not drawn, while `unless: ''` is no condition. Every String
 first goes through the core's own check, as at evaluation: code it refuses
 anywhere in the String, comments included (`"true # system(1)"`), raises its
 `SecurityError`, bad syntax its `ArgumentError`. `action:` lists the callbacks the
-core runs on that transition, before, around, then after; a callback with its own
-conditions shows them: `audit (if enabled?)`.
+core runs on that transition in the order it runs them: before and around
+callbacks in declaration order (an around where it enters; it wraps what follows
+and exits, innermost first, once the state has changed), then the after callbacks.
+A callback with its own conditions shows them: `audit (if enabled?)`.
+`StateMachines::Diagram::Introspection.callback_sequence(machine, from, to, event)`
+gives that order step by step, around exits included.
 
 `draw` takes `io:` (default `$stdout`), `format:` and `human_names: true`, which
 labels states and events by their human names.
@@ -152,8 +156,15 @@ their diagram id, so the nil state (`nil_state`) and a state named `:nil` stay
 two states. `final_states` lists the states the core calls final that no
 transition leaves: the core also calls a state with only loopbacks final, but a
 loopback still fires, and MachineSchema allows no transition out of a final
-state. A dynamic initial state, or a callback with its own conditions (the
-schema's callbacks always run), cannot be described and raises `ArgumentError`.
+state. A dynamic initial state, a callback with its own conditions (the
+schema's callbacks always run), or callbacks the schema would run in another
+order than the core cannot be described and raise `ArgumentError`. Code generated
+from the schema runs every around's Before stage, the guards, before callbacks,
+after callbacks, then every around's AfterSuccess stage; the core checks guards
+first, enters an around where it was declared and exits it before the after
+callbacks. So an around fits the schema only when declared before the before
+callbacks, alone, without after callbacks, and on an unguarded transition or one
+whose source has other candidates (guards then select first in both).
 
 ```ruby
 StateMachines::Diagram::Renderer.machine_schema(Order.state_machine(:status))

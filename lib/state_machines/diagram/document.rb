@@ -38,7 +38,7 @@ module StateMachines
 
           [kind, value.to_h { |machine_name, state| [machine_name.to_s, state&.to_s] }]
         end
-        { **metadata.slice(:event, :from, :to, :label), conditions: conditions, callbacks: metadata[:callbacks] }
+        { **metadata.slice(:event, :from, :to, :label, :callbacks, :callback_sequence), conditions: conditions }
       end
     end
   end

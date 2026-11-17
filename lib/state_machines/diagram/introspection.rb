@@ -110,27 +110,56 @@ module StateMachines
         end
       end
 
-      # The callbacks the core runs on +event_name+ from +from+ to +to+, by
-      # kind, each method as { label:, conditions: } with the callback's own
-      # guards (Introspection.guard_conditions form; all empty when it always
-      # runs). The core files around callbacks with the before ones.
-      def callbacks(machine, from, to, event_name)
+      # The callbacks the core runs on +event_name+ from +from+ to +to+, in
+      # the order it runs them, each method as { kind:, phase:, label:,
+      # conditions: } (conditions in #guard_conditions form; all empty when
+      # it always runs). The core keeps before and around callbacks in one
+      # list in declaration order: a before runs where it was declared, an
+      # around enters there (phase: :enter) and wraps everything after it.
+      # Then the state changes, the arounds exit innermost first
+      # (phase: :exit), and the after callbacks run in declaration order.
+      # phase is nil for before and after. Callback conditions depend on the
+      # object, so a conditional callback is one that may run.
+      def callback_sequence(machine, from, to, event_name)
         query = { from: from, to: to, on: event_name, guard: false }
+        live = ->(callback) { !never?(callback.branch) && callback.branch.matches?(nil, query) }
+        befores = machine.callbacks[:before].select(&live).flat_map do |callback|
+          callback_steps(callback, callback.type, callback.type == :around ? :enter : nil)
+        end
+        exits = befores.select { it[:phase] == :enter }.reverse.map { it.merge(phase: :exit) }
+        afters = machine.callbacks[:after].select(&live).flat_map { callback_steps(it, :after, nil) }
+        befores + exits + afters
+      end
+
+      def callback_steps(callback, kind, phase)
+        conditions = guard_conditions(callback.branch)
+        callback.instance_variable_get(:@methods).map do |method|
+          { kind: kind, phase: phase, label: Labels.action_label(method), conditions: conditions }
+        end
+      end
+
+      # #callback_sequence by kind, each in declaration order, as
+      # { label:, conditions: }; an around is listed once
+      def callbacks(machine, from, to, event_name)
+        callbacks_by_kind(callback_sequence(machine, from, to, event_name))
+      end
+
+      # A #callback_sequence by kind, as #callbacks gives it
+      def callbacks_by_kind(sequence)
+        sequence = sequence.reject { it[:phase] == :exit }
         CALLBACK_TYPES.to_h do |type|
-          matching = machine.callbacks[type == :after ? :after : :before].select do |callback|
-            callback.type == type && !never?(callback.branch) && callback.branch.matches?(nil, query)
-          end
-          [type, matching.flat_map do |callback|
-            conditions = guard_conditions(callback.branch)
-            callback.instance_variable_get(:@methods).map { { label: Labels.action_label(it), conditions: conditions } }
-          end]
+          [type, sequence.select { it[:kind] == type }.map { it.slice(:label, :conditions) }]
         end
       end
 
       # #callbacks as text, by kind: "audit", or "audit (if enabled?)" for a
       # callback that runs only under its conditions
       def callback_labels(machine, from, to, event_name)
-        callbacks(machine, from, to, event_name).transform_values { |list| list.map { Labels.callback_text(it) } }
+        labels_by_kind(callbacks(machine, from, to, event_name))
+      end
+
+      def labels_by_kind(callbacks)
+        callbacks.transform_values { |list| list.map { Labels.callback_text(it) } }
       end
 
       # The core's own check of a String condition (see CORE_EVAL)

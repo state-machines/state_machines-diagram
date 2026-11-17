@@ -113,8 +113,7 @@ module StateMachines
 
       def add_transition(from, to, event, branch)
         conditions = guard_conditions(branch)
-        callbacks = callback_labels(machine, from, to, event.name)
-        actions = callbacks.values.flatten
+        sequence = callback_sequence(machine, from, to, event.name)
         label = label_of(event, event.name.to_s)
 
         transition = diagram.add_transition(
@@ -122,7 +121,7 @@ module StateMachines
           target_state_id: self.class.state_id(to),
           label: diagram_text(label),
           guard: diagram_text(Labels.guard_expression(conditions)),
-          action: diagram_text(actions.join(', '))
+          action: diagram_text(Labels.action_list(sequence))
         )
 
         @transition_metadata << {
@@ -132,7 +131,8 @@ module StateMachines
           to: to&.to_s,
           event: event.name.to_s,
           conditions: conditions,
-          callbacks: callbacks
+          callbacks: labels_by_kind(callbacks_by_kind(sequence)),
+          callback_sequence: sequence.map { it.slice(:kind, :phase).merge(text: Labels.callback_text(it)) }
         }
       end
 
