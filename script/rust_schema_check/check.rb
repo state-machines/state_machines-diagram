@@ -94,24 +94,39 @@ system({ 'CARGO_TARGET_DIR' => target }, 'cargo', 'build', '-q', '--manifest-pat
        exception: true)
 
 owners = [Dragon, Mage, Troll, Regiment, Battle, Character, Commander, Phoenix, RustSchemaCheck::Lantern]
+# The fixture machines SchemaBuilder must refuse, and why; any other refusal,
+# or one of these not happening, fails the check
+expected_refusals = { 'Phoenix#flame' => 'cannot express the conditional callback chant (if ritual?)' }
+failures = []
 machines = {}
+refused = []
 owners.each do |owner|
   owner.state_machines.each_value do |machine|
+    name = "#{owner.name.split('::').last}##{machine.name}"
     path = File.join(work, 'schemas', "#{owner.name.split('::').last}_#{machine.name}.json")
-    File.write(path, StateMachines::Diagram::SchemaBuilder.new(machine).to_json)
-    machines[path] = machine
-  rescue ArgumentError => e
-    puts "refused  #{owner}##{machine.name}: #{e.message}"
+    begin
+      File.write(path, StateMachines::Diagram::SchemaBuilder.new(machine).to_json)
+      machines[path] = [name, machine]
+    rescue ArgumentError => e
+      reason = expected_refusals[name]
+      next failures << "#{name}: unexpected refusal: #{e.message}" unless reason && e.message.include?(reason)
+
+      refused << name
+      puts "refused  #{name}: #{e.message}"
+    end
   end
 end
+(expected_refusals.keys - refused).each { failures << "#{it}: expected a refusal (#{expected_refusals[it]}), none" }
+abort "no schema exported\n#{failures.join("\n")}" if machines.empty?
 
 output, status = Open3.capture2(File.join(target, 'debug/rust-schema-check'), *machines.keys)
 abort 'rust-schema-check failed' unless status.success?
 
-failures = 0
-output.each_line.map { JSON.parse(it) }.each do |report|
-  machine = machines.fetch(report['file'])
-  name = "#{machine.owner_class.name}##{machine.name}"
+reports = output.each_line.map { JSON.parse(it) }
+missing = machines.keys - reports.map { it['file'] }
+missing.each { failures << "#{machines[it].first}: no report from Rust" }
+reports.each do |report|
+  name, machine = machines.fetch(report['file'])
   problems = [report['parse_error'], *report['errors']].compact
   expected = RustSchemaCheck.core_orders(machine)
   seen = report.fetch('edges', []).map do |edge|
@@ -123,7 +138,8 @@ output.each_line.map { JSON.parse(it) }.each do |report|
     key
   end
   (expected.keys - seen).each { problems << "#{it.first(3).join(' ')}: missing from the schema" }
-  failures += 1 if problems.any?
-  puts(problems.empty? ? "ok       #{name} (#{seen.size} transitions)" : "FAILED   #{name}: #{problems.join('; ')}")
+  failures << "#{name}: #{problems.join('; ')}" if problems.any?
+  puts(problems.empty? ? "ok       #{name} (#{seen.size} transitions)" : "FAILED   #{name}")
 end
-abort "#{failures} schema(s) failed" if failures.positive?
+puts "#{reports.size} of #{machines.size} exported schemas reported by Rust"
+abort "FAILED\n#{failures.join("\n")}" if failures.any? || reports.size != machines.size
