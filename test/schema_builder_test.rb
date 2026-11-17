@@ -208,7 +208,7 @@ class SchemaBuilderTest < StateMachines::TestCase
     assert_equal 'nil', schema[:initial]
   end
 
-  def test_a_dynamic_initial_state_is_not_evaluated
+  def test_a_dynamic_initial_state_is_refused_not_evaluated
     klass = Class.new do
       attr_accessor :state
 
@@ -217,7 +217,96 @@ class SchemaBuilderTest < StateMachines::TestCase
       end
     end
 
-    assert_equal 'a', StateMachines::Diagram::SchemaBuilder.new(klass.state_machines[:state]).build[:initial]
+    error = assert_raises(ArgumentError) { StateMachines::Diagram::SchemaBuilder.new(klass.state_machines[:state]).build }
+    assert_match(/needs a static initial state/, error.message)
+  end
+
+  class Relay
+    attr_accessor :state
+
+    state_machine :state, initial: :a do
+      state :b, :c, :d
+      before_transition from: :a, do: :from_a
+      around_transition to: :c, do: :wrap_c
+      after_transition on: :go, do: :after_go
+
+      event :go do
+        transition a: :b, if: :p
+        transition %i[a b] => :c
+        transition a: :d, if: :q
+      end
+
+      event :twice do
+        transition a: :b
+        transition a: :c
+        transition b: :d, unless: :r
+      end
+
+      event :first do
+        transition :a => :b, [:a] => :c
+      end
+
+      event :never
+    end
+  end
+
+  def relay_events
+    StateMachines::Diagram::SchemaBuilder.new(Relay.state_machines[:state]).build[:events].to_h { [it[:name], it] }
+  end
+
+  def test_branches_from_one_source_are_ordered_branching_with_a_fallback
+    assert_equal({ name: 'go', branching: true, transitions: [
+                   { sources: ['a'], target: 'b', guards: ['p'], before: ['from_a'], after: ['after_go'] },
+                   { sources: ['a'], target: 'c', before: ['from_a'], around: ['wrap_c'], after: ['after_go'],
+                     fallback: true },
+                   { sources: ['b'], target: 'c', around: ['wrap_c'], after: ['after_go'], fallback: true }
+                 ] }, relay_events['go'])
+  end
+
+  def test_a_source_an_unguarded_branch_takes_reaches_no_later_branch
+    assert_equal([[['a'], 'b'], [['b'], 'd']], relay_events['twice'][:transitions].map { [it[:sources], it[:target]] })
+    refute relay_events['twice'].key?(:branching)
+  end
+
+  def test_only_the_first_requirement_from_a_source_counts
+    assert_equal([[['a'], 'b']], relay_events['first'][:transitions].map { [it[:sources], it[:target]] })
+  end
+
+  def test_final_states_are_those_the_core_calls_final
+    schema = StateMachines::Diagram::SchemaBuilder.new(Relay.state_machines[:state]).build
+
+    assert_equal %w[c d], schema[:final_states]
+  end
+
+  def test_an_event_without_transitions_is_left_out
+    refute relay_events.key?('never')
+  end
+
+  # What state-machines-rs MachineSchema#validate requires of an event's candidates
+  def test_every_fixture_schema_keeps_the_rs_branching_rules
+    owners = [Dragon, Mage, Troll, Regiment, Battle, Character, Commander, Relay]
+    machines = owners.flat_map { it.state_machines.values }
+    machines.each do |machine|
+      StateMachines::Diagram::SchemaBuilder.new(machine).build[:events].each { assert_rs_candidates(it) }
+    end
+  end
+
+  def assert_rs_candidates(event)
+    transitions = event[:transitions]
+    sources = transitions.flat_map { it[:sources] }
+
+    refute_empty transitions
+    assert_equal sources.uniq.size < sources.size, event.key?(:branching), event[:name]
+    return unless event[:branching]
+
+    transitions.each_with_index do |transition, index|
+      guarded = transition.key?(:guards) || transition.key?(:unless)
+
+      assert_equal !guarded, transition.fetch(:fallback, false), "#{event[:name]}: #{transition}"
+      later = transitions.drop(index + 1).flat_map { it[:sources] }
+
+      assert_empty transition[:sources] & later, "fallback must be last: #{event[:name]}" if transition[:fallback]
+    end
   end
 
   def test_loopback_transitions

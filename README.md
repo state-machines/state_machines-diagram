@@ -123,14 +123,21 @@ callbacks, in diagram order:
  "callbacks": {"before": [], "around": [], "after": ["send_notification"]}}
 ```
 
-`:machine_schema` describes the whole machine for the state-machines-rs CLI,
-each branch's conditions on its transitions (`guards`, `unless`):
+`:machine_schema` describes the whole machine for the state-machines-rs CLI
+(`state-machines validate` accepts it). Each transition carries its branch's
+conditions (`guards`, `unless`) and the callbacks the core runs on it
+(`before`, `around`, `after`). The core takes an event's first branch whose
+source and guards match, so an event with several candidates from one source is
+`branching: true`, its unguarded candidate the `fallback`; a source an unguarded
+branch takes never reaches a later one, which is left out. A dynamic initial
+state cannot be described and raises `ArgumentError`.
 
 ```ruby
 StateMachines::Diagram::Renderer.machine_schema(Order.state_machine(:status))
 # => {name: "Order#status", initial: "pending", states: ["pending", "processing", "shipped", "cancelled"],
 #     events: [{name: "process", transitions: [{sources: ["pending"], target: "processing", guards: ["payment_cleared?"]}]},
-#              {name: "ship", transitions: [{sources: ["processing"], target: "shipped", unless: ["on_hold?", "address_missing?"]}]},
+#              {name: "ship", transitions: [{sources: ["processing"], target: "shipped", unless: ["on_hold?", "address_missing?"],
+#                                            after: ["send_notification"]}]},
 #              {name: "cancel", transitions: [{sources: ["pending", "processing"], target: "cancelled"}]}]}
 ```
 
